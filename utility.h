@@ -120,12 +120,27 @@ class AST_context
 	std::map<std::string, llvm::Function*> funcs;
 public:
 	llvm::BasicBlock* block;
-	AST_context(AST_context* p, llvm::Function* F):
-		parent(p), block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "entry", F))
+	llvm::Function* function;
+	AST_context(AST_context* p, llvm::Function* F): parent(p),
+		block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "entry", F)), function(F)
 	{}
-	AST_context(AST_context* p = nullptr, llvm::BasicBlock* B = llvm::BasicBlock::Create(llvm::getGlobalContext(), "")):
-		parent(p), block(B)
+	AST_context(AST_context* p, const std::string& block_name): parent(p),
+		block(llvm::BasicBlock::Create(llvm::getGlobalContext(), block_name, p->function)), function(p->function)
 	{}
+	AST_context(): parent(nullptr), block(nullptr), function(nullptr)
+	{}
+	~AST_context()
+	{}
+	llvm::BasicBlock* new_block(const std::string& block_name, bool append_now = true)
+	{
+		auto b = llvm::BasicBlock::Create(llvm::getGlobalContext(), block_name);
+		if (append_now) append_block(b);
+		return b;
+	}
+	void append_block(llvm::BasicBlock* b)
+	{
+		function->getBasicBlockList().push_back(block = b);
+	}
 	AST_result get_type(const std::string& name)
 	{
 		if (types[name]) return AST_result(types[name]);

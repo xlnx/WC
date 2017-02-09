@@ -268,8 +268,8 @@ parser::parser(lexer::init_rules& lR, init_rules& iR, expr_init_rules& eiR, std:
 							GOTO[i][sgn] = j;
 							ACTION[i][sgn] = a_move_in;
 						}
-						else
-						{	
+						else 
+						{
 							GOTO[i][sgn] = closures.size();
 							//std::cout << sgn << std::endl;
 							GEN(NEW); // generate this closure
@@ -401,15 +401,7 @@ lexer::init_rules parser::expr_gen(lexer::init_rules& lR, init_rules& iR, expr_i
 		//alert("", r_next);
 		r_this = "expr" + int2str(i);
 	}
-	iR.push_back(
-	{
-		r_this,
-		{
-			{ "(expr)", forward },
-			{ "Id", forward },
-			{ "number", forward },
-		}
-	});
+	iR.push_back( { r_this, { { "exprelem", forward } } } );
 	//alert(r_this, "base");
 	std::sort(lst.begin(), lst.end(),
 		[](const std::string &a, const std::string &b){ return a > b; });
@@ -431,7 +423,6 @@ lexer::init_rules parser::expr_gen(lexer::init_rules& lR, init_rules& iR, expr_i
 	};
 	for (auto& v: lst)
 	{
-		//std::cout << v << " " << gen_reg_expr(v) << std::endl;
 		lR.first.push_back({ v, gen_reg_expr(v), { no_attr }});
 	}
 	return lR;
