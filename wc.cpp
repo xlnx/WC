@@ -35,7 +35,7 @@ int main()
 		lModule->dump();
 		system("pause");
 	}
-	catch (const err& e)	// poly
+	catch (const err& e)		// poly
 	{
 		e.alert();
 	}
