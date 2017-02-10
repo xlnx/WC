@@ -668,8 +668,8 @@ parser::init_rules mparse_rules =
 			Type* type = syntax_node[0].code_gen(context).get_type();
 			auto init_expr = syntax_node[2].code_gen(context);
 			Constant* init = static_cast<Constant*>(init_expr.flag != AST_result::is_none ?
-				create_static_cast(init_expr.get_rvalue(), type) : initialize(type));
-			lBuilder.CreateStore(init, context->alloc_var(type, static_cast<term_node&>(syntax_node[1]).data.attr->value));
+				init_expr.get_rvalue() : nullptr);		// init this value in static by default
+			context->alloc_var(type, static_cast<term_node&>(syntax_node[1]).data.attr->value, init);
 			return AST_result();
 		}}
 	}},
@@ -735,9 +735,8 @@ parser::init_rules mparse_rules =
 			Type* type = syntax_node[0].code_gen(context).get_type();
 			auto init_expr = syntax_node[2].code_gen(context);
 			Value* init = init_expr.flag != AST_result::is_none ?
-				create_static_cast(init_expr.get_rvalue(), type) : initialize(type);
-			auto alloc = context->alloc_var(type, static_cast<term_node&>(syntax_node[1]).data.attr->value);
-			lBuilder.CreateStore(init, alloc);
+				init_expr.get_rvalue() : nullptr;		// will not init
+			context->alloc_var(type, static_cast<term_node&>(syntax_node[1]).data.attr->value, init);
 			return AST_result();
 		}},
 		{ "TypeDefine", parser::forward },

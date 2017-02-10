@@ -231,30 +231,21 @@ llvm::Type* binary_sync_cast(llvm::Value*& LHS, llvm::Value*& RHS, llvm::Type* t
 	return LHS->getType();
 }
 
-llvm::Value* initialize(llvm::Type* type)
-{
-	if (type == float_type) return llvm::ConstantFP::get(lBuilder.getDoubleTy(), 0);
-	if (type == int_type) return llvm::ConstantInt::get(lBuilder.getInt32Ty(), 0);
-	if (type == char_type) return llvm::ConstantInt::get(lBuilder.getInt8Ty(), 0);
-	if (type == bool_type) return llvm::ConstantInt::get(lBuilder.getInt1Ty(), 0);
-	throw err("cannot initialize variable of type: " + type_names[type]);
-}
-
 class AST_context
 {
-	AST_context* parent;
-	llvm::BasicBlock* alloc_block;
-	llvm::BasicBlock* entry_block;
-	llvm::BasicBlock* src_block;
-	llvm::BasicBlock* block;
-	llvm::Function* function;
+	AST_context* parent = nullptr;
+	llvm::BasicBlock* alloc_block = nullptr;
+	llvm::BasicBlock* entry_block = nullptr;
+	llvm::BasicBlock* src_block = nullptr;
+	llvm::BasicBlock* block = nullptr;
+	llvm::Function* function = nullptr;
 	std::set<llvm::BasicBlock*> need_ret;
 	std::map<std::string, llvm::Type*> types;
 	std::map<std::string, llvm::Value*> vars;
 	std::map<std::string, llvm::Function*> funcs;
 public:
-	llvm::BasicBlock* loop_end;
-	llvm::BasicBlock* loop_next;
+	llvm::BasicBlock* loop_end = nullptr;
+	llvm::BasicBlock* loop_next = nullptr;
 	AST_context(AST_context* p, llvm::Function* F):
 		parent(p),
 		alloc_block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "alloc", F)),
@@ -291,8 +282,7 @@ public:
 			if (parent->need_ret.count(parent->block))
 			{
 				parent->need_ret.erase(parent->block);
-				if (need_ret.count(block))
-					parent->need_ret.insert(block);
+				if (need_ret.count(block)) parent->need_ret.insert(block);
 			}
 			parent->block = block;
 		}
@@ -313,7 +303,7 @@ public:
 		if (!ret)
 		{
 			if (function->getReturnType() == void_type) lBuilder.CreateRetVoid();
-			else lBuilder.CreateRet(initialize(function->getReturnType()));
+			else throw err("function return without value");
 		}
 		else lBuilder.CreateRet(create_static_cast(ret, function->getReturnType()));		
 	}
@@ -337,7 +327,7 @@ public:
 	{
 		if (function->getReturnType() != void_type)
 		{
-			if (need_ret.count(block)) leave_function(initialize(function->getReturnType()));
+			if (need_ret.count(block)) throw err("function may return without value");;
 		}
 		else leave_function();
 		lBuilder.SetInsertPoint(alloc_block);
@@ -376,20 +366,22 @@ public:
 		check_conflict(name);
 		types[name] = type;
 	}
-	llvm::Value* alloc_var(llvm::Type* type, const std::string& name)
+	llvm::Value* alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init = nullptr)
 	{
 		if (vars[name]) throw err("redefined variable: " + name);
 		check_conflict(name);
 		llvm::Value* alloc;
+		if (init) init = create_static_cast(init, type);
 		if (alloc_block)
 		{
 			lBuilder.SetInsertPoint(alloc_block);
 			alloc = lBuilder.CreateAlloca(type);
 			activate();
+			if (init) lBuilder.CreateStore(init, alloc);
 			return vars[name] = alloc;
 		}
 		else return vars[name] = new llvm::GlobalVariable(*lModule,
-			type, false, llvm::GlobalValue::ExternalLinkage, nullptr);
+			type, false, llvm::GlobalValue::ExternalLinkage, static_cast<llvm::Constant*>(init));
 	}
 	void add_func(const std::string& name, llvm::Function* func)
 	{
