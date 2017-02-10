@@ -71,7 +71,6 @@ struct AST
 	virtual AST_result code_gen(AST_context* context) = 0;
 	void append_child(AST* p) { sub.push_back(p); }
 	AST& operator[](int i) { return *sub[i]; }
-	term_node& operator()(int i) { return *(term_node*)sub[i]; }
 	void destroy() { for (auto& n: sub) n->destroy(); delete this; }
 private:
 	unsigned ln;

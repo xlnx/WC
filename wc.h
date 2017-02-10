@@ -606,14 +606,15 @@ parser::init_rules mparse_rules =
 	}},
 	{ "TypeDefine", {
 		{ "type Id = Type;", [](gen_node& syntax_node, AST_context* context){
-			context->add_type(syntax_node(0).data.attr->value, syntax_node[1].code_gen(context).type);
+			context->add_type(static_cast<term_node&>(syntax_node[0]).data.attr->value,
+				syntax_node[1].code_gen(context).type);
 			return AST_result();
 		}}
 	}},
 	{ "Function", {
 		{ "Type Id ( FunctionParams ) { Block }", [](gen_node& syntax_node, AST_context* context){
 			function_params* p = reinterpret_cast<function_params*>(syntax_node[2].code_gen(context).custom_data);
-			auto& name = syntax_node(1).data.attr->value;
+			auto& name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
 			FunctionType *FT = FunctionType::get(syntax_node[0].code_gen(context).type, p->first, false);
 			Function* F = Function::Create(FT, Function::ExternalLinkage, name, lModule);
 			context->add_func(name, F);
@@ -631,7 +632,7 @@ parser::init_rules mparse_rules =
 		}},
 		{ "Id ( FunctionParams ) { Block }", [](gen_node& syntax_node, AST_context* context){
 			function_params* p = reinterpret_cast<function_params*>(syntax_node[1].code_gen(context).custom_data);
-			auto& name = syntax_node(0).data.attr->value;
+			auto& name = static_cast<term_node&>(syntax_node[0]).data.attr->value;
 			FunctionType *FT = FunctionType::get(void_type, p->first, false);
 			Function* F = Function::Create(FT, Function::ExternalLinkage, name, lModule);
 			context->add_func(name, F);
@@ -656,20 +657,21 @@ parser::init_rules mparse_rules =
 		{ "FunctionParamList , Type Id", [](gen_node& syntax_node, AST_context* context){
 			function_params* p = reinterpret_cast<function_params*>(syntax_node[0].code_gen(context).custom_data);
 			p->first.push_back(syntax_node[1].code_gen(context).type);
-			p->second.push_back(&syntax_node(2).data);
+			p->second.push_back(&static_cast<term_node&>(syntax_node[2]).data);
 			return AST_result(p);
 		}},
 		{ "Type Id", [](gen_node& syntax_node, AST_context* context){
 			function_params* p = new function_params;
 			p->first.push_back(syntax_node[0].code_gen(context).type);
-			p->second.push_back(&syntax_node(1).data);
+			p->second.push_back(&static_cast<term_node&>(syntax_node[1]).data);
 			return AST_result(p);
 		}},
 	}},
 	{ "GlobalVarDefine", {
 		{ "Type Id;", [](gen_node& syntax_node, AST_context* context){
 			Type* type = syntax_node[0].code_gen(context).type;
-			lBuilder.CreateStore((Constant*)initialize(type), context->alloc_var(type, syntax_node(1).data.attr->value));
+			lBuilder.CreateStore((Constant*)initialize(type),
+				context->alloc_var(type, static_cast<term_node&>(syntax_node[1]).data.attr->value));
 			return AST_result();
 		}}
 	}},
@@ -682,7 +684,9 @@ parser::init_rules mparse_rules =
 		{ "float", parser::forward },
 		{ "char", parser::forward },
 		{ "bool", parser::forward },
-		{ "Id", [](gen_node& syntax_node, AST_context* context){ return context->get_type(syntax_node(0).data.attr->value); } }
+		{ "Id", [](gen_node& syntax_node, AST_context* context){
+			return context->get_type(static_cast<term_node&>(syntax_node[0]).data.attr->value);
+		}}
 	}},
 	{ "Stmt", {
 		{ "while ( expr ) Stmt", [](gen_node& syntax_node, AST_context* context){
@@ -726,7 +730,7 @@ parser::init_rules mparse_rules =
 			auto init_expr = syntax_node[2].code_gen(context);
 			Value* init = init_expr.flag != AST_result::is_none ?
 				create_static_cast(rvalue(init_expr).value, type) : initialize(type);
-			auto alloc = context->alloc_var(type, syntax_node(1).data.attr->value);
+			auto alloc = context->alloc_var(type, static_cast<term_node&>(syntax_node[1]).data.attr->value);
 			lBuilder.CreateStore(init, alloc);
 			return AST_result();
 		}},
