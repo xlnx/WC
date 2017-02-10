@@ -309,36 +309,24 @@ lexer::init_rules parser::expr_gen(lexer::init_rules& lR, init_rules& iR, expr_i
 	auto gen_pack = [&](const std::string& s, const std::string& del = ",")
 	{	// TODO: repair this
 		iR.push_back(
-		{
-			s + "pk",
-			{
-				{ s + "pkhp", forward },
-				{ "", [](gen_node&, AST_context* context){ return AST_result(new value_pack); } }
-			}
-		});
+		{ s + "pk", {
+			{ s + "pkhp", forward },
+			{ "", [](gen_node&, AST_context* context){ return AST_result(new value_pack); } }
+		}});
 		//alert(s + "pk", s + " " + s + "pkhp");
 		iR.push_back(
-		{
-			s + "pkhp",
-			{
-				{
-					s + "pkhp" + " " + del + " " + s, [](gen_node& syntax_node, AST_context* context)
-					{
-						auto p = syntax_node[0].code_gen(context).get_data<value_pack>();
-						p->push_back(syntax_node[1].code_gen(context).get_rvalue());
-						return AST_result(p);
-					}
-				},
-				{
-					s, [](gen_node& syntax_node, AST_context* context)
-					{
-						auto p = new value_pack;
-						p->push_back(syntax_node[0].code_gen(context).get_rvalue());
-						return AST_result(p);
-					}
-				}
-			}
-		});
+		{ s + "pkhp", {
+			{ s + "pkhp" + " " + del + " " + s, [](gen_node& syntax_node, AST_context* context){
+				auto p = syntax_node[0].code_gen(context).get_data<value_pack>();
+				p->push_back(syntax_node[1].code_gen(context).get_rvalue());
+				return AST_result(p);
+			}},
+			{ s, [](gen_node& syntax_node, AST_context* context){
+				auto p = new value_pack;
+				p->push_back(syntax_node[0].code_gen(context).get_rvalue());
+				return AST_result(p);
+			}}
+		}});
 		//alert(s + "pkhp", del + " " + s + " " + s + "pkhp");
 	};
 	lexer_base lex(
@@ -364,18 +352,14 @@ lexer::init_rules parser::expr_gen(lexer::init_rules& lR, init_rules& iR, expr_i
 				std::vector<token> arr;
 				token T;
 				while (T = lex.next_token())
-				{
 					arr.push_back(T);
-				}
 				std::string str = "";
 				int sz = arr.size();
 				int sub_pos = v.asl == right_asl ? 0 : sz - 1;
 				for (int i = 0; i < sz; ++i)
 				{
 					if (arr[i].name == "param")
-					{
 						str += i == sub_pos ? r_next : r_this + " ";
-					}
 					else if (arr[i].name == "piece")
 					{
 						std::string& s = arr[i].attr->value;
@@ -390,9 +374,7 @@ lexer::init_rules parser::expr_gen(lexer::init_rules& lR, init_rules& iR, expr_i
 						str += s + " ";
 					}
 					else if (arr[i].name == "pack")
-					{	// TODO: modify
 						str += tag + "pk ";
-					}
 				}
 				iR.back().second.push_back({ str, v.func });
 				//alert("", str);

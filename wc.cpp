@@ -24,8 +24,8 @@ int main()
 			{
 				mparser.parse(buff);
 			}
-			catch (const err& e)	// poly
-			{
+			catch (const err& e)
+			{		// poly
 				e.alert();
 			}
 			fflush(stdin);
