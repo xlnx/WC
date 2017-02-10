@@ -112,35 +112,240 @@ protected:
 static llvm::Module *lModule = new llvm::Module("LRparser", llvm::getGlobalContext());
 static llvm::IRBuilder<> lBuilder(llvm::getGlobalContext());
 
+auto void_type = lBuilder.getVoidTy();
+auto int_type = lBuilder.getInt32Ty();
+auto float_type = lBuilder.getDoubleTy();
+auto char_type = lBuilder.getInt8Ty();
+auto bool_type = lBuilder.getInt1Ty();
+
+using type_name_lookup = std::map<llvm::Type*, std::string>;
+using type_item = type_name_lookup::value_type;
+type_name_lookup type_names = 
+{
+	type_item(int_type, "int"),
+	type_item(float_type, "float"),
+	type_item(char_type, "char"),
+	type_item(bool_type, "bool")
+};
+
+// use this table to create static cast command
+using static_cast_lookup = std::map<std::pair<llvm::Type*, llvm::Type*>, std::function<llvm::Value*(llvm::Value*)>>;
+using cast_item = static_cast_lookup::value_type;
+static_cast_lookup static_casts =
+{	// cast from int
+	cast_item({int_type, float_type}, [](llvm::Value* v){ return lBuilder.CreateSIToFP(v, float_type); } ),
+	cast_item({int_type, char_type}, [](llvm::Value* v){ return lBuilder.CreateTrunc(v, char_type); } ),
+	cast_item({int_type, bool_type}, [](llvm::Value* v){ return lBuilder.CreateICmpNE(v, 
+		llvm::ConstantInt::get(int_type, 0)); } ),
+	// cast from float
+	cast_item({float_type, int_type}, [](llvm::Value* v){ return lBuilder.CreateFPToSI(v, int_type); } ),
+	cast_item({float_type, char_type}, [](llvm::Value* v){ return lBuilder.CreateFPToSI(v, char_type); } ),	// disable
+	cast_item({float_type, bool_type}, [](llvm::Value* v){ return lBuilder.CreateFCmpONE(v, 
+		llvm::ConstantFP::get(float_type, 0) ); } ),
+	// cast from char
+	cast_item({char_type, int_type}, [](llvm::Value* v){ return lBuilder.CreateSExt(v, int_type); } ),
+	cast_item({char_type, float_type}, [](llvm::Value* v){ return lBuilder.CreateSIToFP(v, float_type); } ),
+	cast_item({char_type, bool_type}, [](llvm::Value* v){ return lBuilder.CreateICmpNE(v,
+		llvm::ConstantInt::get(char_type, 0)); } ),
+	// cast from bool
+	cast_item({bool_type, int_type}, [](llvm::Value* v){ return lBuilder.CreateSExt(v, int_type); } ),
+	cast_item({bool_type, float_type}, [](llvm::Value* v){ return lBuilder.CreateSIToFP(v, float_type); } ),
+	cast_item({bool_type, char_type}, [](llvm::Value* v){ return lBuilder.CreateSExt(v, char_type); } ),
+};
+
+using cast_priority_map = std::map<llvm::Type*, unsigned>;
+using priority_item = cast_priority_map::value_type;
+cast_priority_map cast_priority =
+{
+	priority_item(bool_type, 0),
+	priority_item(char_type, 1),
+	priority_item(int_type, 2),
+	priority_item(float_type, 3)
+};
+
+llvm::Value* create_static_cast(llvm::Value* value, llvm::Type* type)
+{
+	llvm::Type* cur_type = value->getType();
+	if (cur_type != type)
+	{
+		std::pair<llvm::Type*, llvm::Type*> key = {cur_type, type};
+		if (static_casts[key]) return static_casts[key](value);
+		throw err("cannot cast " + type_names[cur_type] + " to " + type_names[type] + " automatically");
+	}
+	return value;
+}
+
+AST_result rvalue(AST_result data)
+{
+	switch (data.flag)
+	{	// cast lvalue to rvalue
+	case AST_result::is_lvalue: data.value = lBuilder.CreateLoad(data.value);
+	case AST_result::is_rvalue: break;
+	default: throw err("invalid value");
+	}
+	return data;
+}
+
+AST_result lvalue(AST_result data)
+{
+	if (data.flag != AST_result::is_lvalue)
+		throw err("value cannot be assigned to");
+	return data;
+}
+
+AST_result func(AST_result data)
+{
+	if (data.flag != AST_result::is_function)
+		throw err("invalid function");
+	return data;
+}
+
+llvm::Type* get_binary_sync_type(llvm::Value* LHS, llvm::Value* RHS)
+{
+	auto ltype = LHS->getType(), rtype = RHS->getType();
+	if (cast_priority[ltype] < cast_priority[rtype]) return rtype;
+	return ltype;
+}
+
+llvm::Type* binary_sync_cast(AST_result& LHS, AST_result& RHS, llvm::Type* type = nullptr)
+{
+	if (!type)
+	{
+		auto ltype = LHS.value->getType(), rtype = RHS.value->getType();
+		if (cast_priority[ltype] < cast_priority[rtype])
+		{
+			LHS.value = create_static_cast(LHS.value, rtype);
+		}
+		else if (cast_priority[ltype] > cast_priority[rtype])
+		{
+			RHS.value = create_static_cast(RHS.value, ltype);
+		}
+	}
+	else
+	{
+		LHS.value = create_static_cast(LHS.value, type);
+		RHS.value = create_static_cast(RHS.value, type);
+	}
+	return LHS.value->getType();
+}
+
+llvm::Value* initialize(llvm::Type* type)
+{
+	if (type == float_type) return llvm::ConstantFP::get(lBuilder.getDoubleTy(), 0);
+	if (type == int_type) return llvm::ConstantInt::get(lBuilder.getInt32Ty(), 0);
+	if (type == char_type) return llvm::ConstantInt::get(lBuilder.getInt8Ty(), 0);
+	if (type == bool_type) return llvm::ConstantInt::get(lBuilder.getInt1Ty(), 0);
+	throw err("cannot initialize variable of type: " + type_names[type]);
+}
+
 class AST_context
 {
 	AST_context* parent;
+	llvm::BasicBlock* alloc_block;
+	llvm::BasicBlock* entry_block;
+	llvm::BasicBlock* src_block;
+	llvm::BasicBlock* block;
+	llvm::Function* function;
+	std::set<llvm::BasicBlock*> need_ret;
 	std::map<std::string, llvm::Type*> types;
 	std::map<std::string, llvm::Value*> vars;
 	std::map<std::string, llvm::Function*> funcs;
 public:
-	llvm::BasicBlock* block;
-	llvm::Function* function;
-	AST_context(AST_context* p, llvm::Function* F): parent(p),
-		block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "entry", F)), function(F)
+	llvm::BasicBlock* loop_end;
+	llvm::BasicBlock* loop_next;
+	AST_context(AST_context* p, llvm::Function* F):
+		parent(p),
+		alloc_block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "alloc", F)),
+		entry_block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "entry", F)),
+		block(entry_block),
+		need_ret({entry_block}),
+		function(F)
+	{ lBuilder.SetInsertPoint(block); }
+	/*AST_context(AST_context* p, const std::string& block_name):
+		parent(p),
+		alloc_block(p->alloc_block),
+		entry_block(p->entry_block),
+		src_block(nullptr),
+		block(llvm::BasicBlock::Create(llvm::getGlobalContext(), block_name, p->function)),
+		need_ret({block}),
+		function(p->function)
+	{}*/
+	AST_context(AST_context* p):
+		parent(p),
+		alloc_block(p->alloc_block),
+		entry_block(p->entry_block),
+		src_block(p->block),
+		block(p->block),
+		need_ret({block}),
+		loop_end(p->loop_end),
+		loop_next(p->loop_next),
+		function(p->function)
 	{}
-	AST_context(AST_context* p, const std::string& block_name): parent(p),
-		block(llvm::BasicBlock::Create(llvm::getGlobalContext(), block_name, p->function)), function(p->function)
-	{}
-	AST_context(): parent(nullptr), block(nullptr), function(nullptr)
-	{}
+	AST_context() {}
 	~AST_context()
-	{}
-	llvm::BasicBlock* new_block(const std::string& block_name, bool append_now = true)
 	{
-		auto b = llvm::BasicBlock::Create(llvm::getGlobalContext(), block_name);
-		if (append_now) append_block(b);
-		return b;
+		if (src_block)
+		{
+			if (parent->need_ret.count(parent->block))
+			{
+				parent->need_ret.erase(parent->block);
+				if (need_ret.count(block))
+					parent->need_ret.insert(block);
+			}
+			parent->block = block;
+		}
 	}
-	void append_block(llvm::BasicBlock* b)
+	llvm::BasicBlock* new_block(const std::string& block_name)
+	{
+		return llvm::BasicBlock::Create(llvm::getGlobalContext(), block_name);
+	}
+	void activate() { lBuilder.SetInsertPoint(block); }
+	void set_block(llvm::BasicBlock* b)
 	{
 		function->getBasicBlockList().push_back(block = b);
+		activate();
 	}
+	void leave_function(llvm::Value* ret = nullptr)
+	{
+		need_ret.erase(block);
+		if (!ret)
+		{
+			if (function->getReturnType() == void_type) lBuilder.CreateRetVoid();
+			else lBuilder.CreateRet(initialize(function->getReturnType()));
+		}
+		else lBuilder.CreateRet(create_static_cast(ret, function->getReturnType()));		
+	}
+	void cond_jump_to(llvm::Value* cond, llvm::BasicBlock* b1, llvm::BasicBlock* b2)
+	{
+		lBuilder.CreateCondBr(create_static_cast(cond, bool_type), b1, b2);
+		if (need_ret.count(block))
+		{
+			need_ret.insert(b1); need_ret.insert(b2); need_ret.erase(block);
+		}
+	}
+	void jump_to(llvm::BasicBlock* b)
+	{
+		lBuilder.CreateBr(b);
+		if (need_ret.count(block))
+		{
+			need_ret.insert(b); need_ret.erase(block);
+		}
+	}
+	void finish_func()
+	{
+		if (function->getReturnType() != void_type)
+		{
+			if (need_ret.count(block)) leave_function(initialize(function->getReturnType()));
+		}
+		else leave_function();
+		lBuilder.SetInsertPoint(alloc_block);
+		lBuilder.CreateBr(entry_block);
+		llvm::verifyFunction(*function);
+		function->dump();
+	}
+	llvm::BasicBlock* get_block() { return block; }
+	llvm::Function* get_function() { return function; }
+	
 	AST_result get_type(const std::string& name)
 	{
 		if (types[name]) return AST_result(types[name]);
@@ -169,11 +374,20 @@ public:
 		check_conflict(name);
 		types[name] = type;
 	}
-	void add_var(const std::string& name, llvm::Value* value)
+	llvm::Value* alloc_var(llvm::Type* type, const std::string& name)
 	{
 		if (vars[name]) throw err("redefined variable: " + name);
 		check_conflict(name);
-		vars[name] = value;
+		llvm::Value* alloc;
+		if (alloc_block)
+		{
+			lBuilder.SetInsertPoint(alloc_block);
+			alloc = lBuilder.CreateAlloca(type);
+			activate();
+			return vars[name] = alloc;
+		}
+		else return vars[name] = new llvm::GlobalVariable(*lModule,
+				type, false, llvm::GlobalValue::ExternalLinkage, nullptr);
 	}
 	void add_func(const std::string& name, llvm::Function* func)
 	{
