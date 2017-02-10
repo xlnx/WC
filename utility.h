@@ -28,7 +28,7 @@ public:
 	token() = default;
 	token(const std::string& n, unsigned _ln, unsigned _col, pchar _ptr, const pointer& p = nullptr):
 		name(n), ln(_ln), col(_col), ptr(_ptr), attr(p) {}
-	explicit operator bool() { return name[0]; }
+	explicit operator bool() const { return name != ""; }
 public:
 	std::string name;
 	unsigned ln;
@@ -42,26 +42,9 @@ struct err;
 struct gen_node;
 struct term_node;
 struct AST_context;
+class AST_result;
 using sub_nodes = std::vector<AST*>;
 // AST node base
-
-struct AST_result
-{
-	using result_type = enum { is_none = 0, is_type, is_lvalue, is_rvalue, is_function, is_custom };
-	union
-	{
-		llvm::Type* type;
-		llvm::Value* value;
-		llvm::Function* function;
-		void* custom_data;
-	};
-	result_type flag;
-	AST_result(): value(nullptr), flag(is_none) {}
-	AST_result(llvm::Type* p): type(p), flag(is_type) {}
-	AST_result(llvm::Function* p): function(p), flag(is_function) {}
-	AST_result(llvm::Value* p, bool islvalue): value(p), flag(islvalue?is_lvalue:is_rvalue) {}
-	explicit AST_result(void* p): custom_data(p), flag(is_custom) {}
-};
 
 struct AST
 {
@@ -77,6 +60,7 @@ private:
 	unsigned col;
 	pchar ptr;
 };
+
 AST* cur_node = nullptr;
 
 struct err:std::logic_error
@@ -110,6 +94,54 @@ protected:
 
 static llvm::Module *lModule = new llvm::Module("LRparser", llvm::getGlobalContext());
 static llvm::IRBuilder<> lBuilder(llvm::getGlobalContext());
+
+class AST_result
+{
+	union
+	{
+		llvm::Type* type;
+		llvm::Value* value;
+		llvm::Function* function;
+		void* custom_data;
+	};
+public:
+	using result_type = enum { is_none = 0, is_type, is_lvalue, is_rvalue, is_function, is_custom };
+	result_type flag;
+	AST_result(): value(nullptr), flag(is_none) {}
+	AST_result(llvm::Type* p): type(p), flag(is_type) {}
+	AST_result(llvm::Function* p): function(p), flag(is_function) {}
+	AST_result(llvm::Value* p, bool islvalue): value(p), flag(islvalue?is_lvalue:is_rvalue) {}
+	explicit AST_result(void* p): custom_data(p), flag(is_custom) {}
+	llvm::Type* get_type() const
+	{
+		if (flag != is_type) throw err("invalid typename");
+		return type;
+	}
+	llvm::Value* get_rvalue() const
+	{
+		switch (flag)
+		{	// cast lvalue to rvalue
+		case is_lvalue: return lBuilder.CreateLoad(value);
+		case is_rvalue: return value;
+		default: throw err("invalid value");
+		}
+	}
+	llvm::Value* get_lvalue() const
+	{
+		if (flag != is_lvalue) throw err("value cannot be assigned to");
+		return value;
+	}
+	llvm::Function* get_function() const
+	{
+		if (flag != is_function) throw err("invalid function");
+		return function;
+	}
+	template <typename T> T* get_data() const
+	{
+		if (flag != is_custom) throw err("invalid custom data");
+		return reinterpret_cast<T*>(custom_data);
+	}
+};
 
 auto void_type = lBuilder.getVoidTy();
 auto int_type = lBuilder.getInt32Ty();
@@ -174,31 +206,6 @@ llvm::Value* create_static_cast(llvm::Value* value, llvm::Type* type)
 	return value;
 }
 
-AST_result rvalue(AST_result data)
-{
-	switch (data.flag)
-	{	// cast lvalue to rvalue
-	case AST_result::is_lvalue: data.value = lBuilder.CreateLoad(data.value);
-	case AST_result::is_rvalue: break;
-	default: throw err("invalid value");
-	}
-	return data;
-}
-
-AST_result lvalue(AST_result data)
-{
-	if (data.flag != AST_result::is_lvalue)
-		throw err("value cannot be assigned to");
-	return data;
-}
-
-AST_result func(AST_result data)
-{
-	if (data.flag != AST_result::is_function)
-		throw err("invalid function");
-	return data;
-}
-
 llvm::Type* get_binary_sync_type(llvm::Value* LHS, llvm::Value* RHS)
 {
 	auto ltype = LHS->getType(), rtype = RHS->getType();
@@ -206,26 +213,22 @@ llvm::Type* get_binary_sync_type(llvm::Value* LHS, llvm::Value* RHS)
 	return ltype;
 }
 
-llvm::Type* binary_sync_cast(AST_result& LHS, AST_result& RHS, llvm::Type* type = nullptr)
+llvm::Type* binary_sync_cast(llvm::Value*& LHS, llvm::Value*& RHS, llvm::Type* type = nullptr)
 {
 	if (!type)
 	{
-		auto ltype = LHS.value->getType(), rtype = RHS.value->getType();
+		auto ltype = LHS->getType(), rtype = RHS->getType();
 		if (cast_priority[ltype] < cast_priority[rtype])
-		{
-			LHS.value = create_static_cast(LHS.value, rtype);
-		}
+			LHS= create_static_cast(LHS, rtype);
 		else if (cast_priority[ltype] > cast_priority[rtype])
-		{
-			RHS.value = create_static_cast(RHS.value, ltype);
-		}
+			RHS= create_static_cast(RHS, ltype);
 	}
 	else
 	{
-		LHS.value = create_static_cast(LHS.value, type);
-		RHS.value = create_static_cast(RHS.value, type);
+		LHS = create_static_cast(LHS, type);
+		RHS = create_static_cast(RHS, type);
 	}
-	return LHS.value->getType();
+	return LHS->getType();
 }
 
 llvm::Value* initialize(llvm::Type* type)
@@ -386,7 +389,7 @@ public:
 			return vars[name] = alloc;
 		}
 		else return vars[name] = new llvm::GlobalVariable(*lModule,
-				type, false, llvm::GlobalValue::ExternalLinkage, nullptr);
+			type, false, llvm::GlobalValue::ExternalLinkage, nullptr);
 	}
 	void add_func(const std::string& name, llvm::Function* func)
 	{

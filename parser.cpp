@@ -56,7 +56,6 @@ parser::parser(lexer::init_rules& lR, init_rules& iR, expr_init_rules& eiR, std:
 			rules.push_back(r);
 		}
 	}
-	
 	std::map<sign, std::set<sign>> FIRST, FOLLOW;
 	std::set<sign> been, settled;
 	std::function<void(const sign&)> gen_first = [&](const sign& s)->void
@@ -323,18 +322,18 @@ lexer::init_rules parser::expr_gen(lexer::init_rules& lR, init_rules& iR, expr_i
 			s + "pkhp",
 			{
 				{
-					s + "pkhp" + " " + del + " " + s, [](gen_node& G, AST_context* context)
+					s + "pkhp" + " " + del + " " + s, [](gen_node& syntax_node, AST_context* context)
 					{
-						auto p = (value_pack*)(G[0].code_gen(context).custom_data);
-						p->push_back(G[1].code_gen(context).value);
+						auto p = syntax_node[0].code_gen(context).get_data<value_pack>();
+						p->push_back(syntax_node[1].code_gen(context).get_rvalue());
 						return AST_result(p);
 					}
 				},
 				{
-					s, [](gen_node& G, AST_context* context)
+					s, [](gen_node& syntax_node, AST_context* context)
 					{
 						auto p = new value_pack;
-						p->push_back(G[0].code_gen(context).value);
+						p->push_back(syntax_node[0].code_gen(context).get_rvalue());
 						return AST_result(p);
 					}
 				}
@@ -349,66 +348,66 @@ lexer::init_rules parser::expr_gen(lexer::init_rules& lR, init_rules& iR, expr_i
 		{ "param", "%", {no_attr} },
 		{ "piece", "(?:\\\\%|[^\\s%]*)+", {} },
 	});
-	gen_pack("expr");
-	const std::string tag = "expr";
-	std::string r_this = "expr";
 	std::vector<std::string> lst;
-	for (int i = 0; i < eiR.size(); ++i)
+	auto generate_by_name = [&](const std::string& tag)
 	{
-		const std::string r_next = tag + int2str(i);
-		iR.push_back( { r_this, {} } );
-		//alert(r_this, "follow");
-		for (auto& v: eiR[i])
+		gen_pack(tag);
+		std::string r_this = tag;
+		for (int i = 0; i < eiR.size(); ++i)
 		{
-			lex.input(v.mode_str.c_str());
-			std::vector<token> arr;
-			token T;
-			while (T = lex.next_token())
+			const std::string r_next = tag + int2str(i);
+			iR.push_back( { r_this, {} } );
+			//alert(r_this, "follow");
+			for (auto& v: eiR[i])
 			{
-				arr.push_back(T);
-			}
-			std::string str = "";
-			int sz = arr.size();
-			int sub_pos = v.asl == right_asl ? 0 : sz - 1;
-			for (int i = 0; i < sz; ++i)
-			{
-				if (arr[i].name == "param")
+				lex.input(v.mode_str.c_str());
+				std::vector<token> arr;
+				token T;
+				while (T = lex.next_token())
 				{
-					str += i == sub_pos ? r_next : r_this + " ";
+					arr.push_back(T);
 				}
-				else if (arr[i].name == "piece")
+				std::string str = "";
+				int sz = arr.size();
+				int sub_pos = v.asl == right_asl ? 0 : sz - 1;
+				for (int i = 0; i < sz; ++i)
 				{
-					std::string& s = arr[i].attr->value;
-					char* ptr = const_cast<char*>(s.c_str());
-					char* pst = ptr;
-					while (ptr = strstr(ptr, "\\%"))
+					if (arr[i].name == "param")
 					{
-						s.erase(ptr - pst, 1);
-						*ptr = '%';
+						str += i == sub_pos ? r_next : r_this + " ";
 					}
-					lst.push_back(s);
-					str += s + " ";
+					else if (arr[i].name == "piece")
+					{
+						std::string& s = arr[i].attr->value;
+						char* ptr = const_cast<char*>(s.c_str());
+						char* pst = ptr;
+						while (ptr = strstr(ptr, "\\%"))
+						{
+							s.erase(ptr - pst, 1);
+							*ptr = '%';
+						}
+						lst.push_back(s);
+						str += s + " ";
+					}
+					else if (arr[i].name == "pack")
+					{	// TODO: modify
+						str += tag + "pk ";
+					}
 				}
-				else if (arr[i].name == "pack")
-				{	// TODO: modify
-					str += "exprpk ";
-				}
+				iR.back().second.push_back({ str, v.func });
+				//alert("", str);
 			}
-			iR.back().second.push_back({ str, v.func });
-			//alert("", str);
+			iR.back().second.push_back({ r_next, forward });
+			//alert("", r_next);
+			r_this = tag + int2str(i);
 		}
-		iR.back().second.push_back({ r_next, forward });
-		//alert("", r_next);
-		r_this = "expr" + int2str(i);
-	}
-	iR.push_back( { r_this, { { "exprelem", forward } } } );
+		iR.push_back( { r_this, { { tag + "elem", forward } } } );
+	};
 	//alert(r_this, "base");
-	std::sort(lst.begin(), lst.end(),
-		[](const std::string &a, const std::string &b){ return a > b; });
-	for (auto itr = lst.begin(); itr < lst.end() - 1; ++itr)
-	{
-		if (*itr == *(itr + 1)) lst.erase(itr);
-	}
+	generate_by_name("expr");
+	generate_by_name("constexpr");
+	std::sort(lst.begin(), lst.end(), std::greater<std::string>());
+	lst.erase(std::unique(lst.begin(), lst.end()), lst.end());
 	const auto escape_lst = "*.?+-$^[](){}|\\/";
 	auto gen_reg_expr = [&escape_lst](const std::string& s)
 	{

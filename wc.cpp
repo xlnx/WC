@@ -6,7 +6,7 @@ char buff[buff_len];
 int main()
 {
 	try
-	{
+	{	
 		parser mparser(mlex_rules, mparse_rules, mexpr_rules);
 		while (1)
 		{
@@ -23,7 +23,6 @@ int main()
 			try
 			{
 				mparser.parse(buff);
-				//mparser.parse(tokens);
 			}
 			catch (const err& e)	// poly
 			{

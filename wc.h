@@ -1,4 +1,3 @@
-// wc.h
 #ifndef __W_COMPILER__HEADER_FILE
 #define __W_COMPILER__HEADER_FILE
 #include <iostream>
@@ -109,168 +108,169 @@ parser::expr_init_rules mexpr_rules =
 {
 	{
 		{ "%=%", right_asl, [](gen_node& syntax_node, AST_context* context)->AST_result{
-			auto LHS = lvalue(syntax_node[0].code_gen(context));
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
-			RHS.value = create_static_cast(RHS.value, static_cast<AllocaInst*>(LHS.value)->getAllocatedType());
-			lBuilder.CreateStore(RHS.value, LHS.value);
-			return LHS;
+			auto val = syntax_node[0].code_gen(context);
+			auto LHS = val.get_lvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
+			RHS = create_static_cast(RHS, static_cast<AllocaInst*>(LHS)->getAllocatedType());
+			lBuilder.CreateStore(RHS, LHS);
+			return val;
 		}},
 		{ "%/=%", right_asl, [](gen_node& syntax_node, AST_context* context){
 			auto val = syntax_node[0].code_gen(context);
-			auto LHS = rvalue(val);
-			val = lvalue(val);
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
-			auto type = LHS.value->getType();
-			create_static_cast(RHS.value, type);
+			auto alloc = val.get_lvalue();
+			auto LHS = val.get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
+			auto type = LHS->getType();
+			create_static_cast(RHS, type);
 			if (type == int_type || type == bool_type || type == char_type)
 			{
-				lBuilder.CreateStore(lBuilder.CreateSDiv(LHS.value, RHS.value), val.value);
+				lBuilder.CreateStore(lBuilder.CreateSDiv(LHS, RHS), alloc);
 				return val;
 			}
 			else if (type == float_type)
 			{
-				lBuilder.CreateStore(lBuilder.CreateFDiv(LHS.value, RHS.value), val.value);
+				lBuilder.CreateStore(lBuilder.CreateFDiv(LHS, RHS), alloc);
 				return val;
 			}
 			throw err("unknown operator /= for type: " + type_names[type]);
 		}},
 		{ "%*=%", right_asl, [](gen_node& syntax_node, AST_context* context){
 			auto val = syntax_node[0].code_gen(context);
-			auto LHS = rvalue(val);
-			val = lvalue(val);
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
-			auto type = LHS.value->getType();
-			create_static_cast(RHS.value, type);
+			auto alloc = val.get_lvalue();
+			auto LHS = val.get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
+			auto type = LHS->getType();
+			create_static_cast(RHS, type);
 			if (type == int_type || type == bool_type || type == char_type)
 			{
-				lBuilder.CreateStore(lBuilder.CreateMul(LHS.value, RHS.value), val.value);
+				lBuilder.CreateStore(lBuilder.CreateMul(LHS, RHS), alloc);
 				return val;
 			}
 			else if (type == float_type)
 			{
-				lBuilder.CreateStore(lBuilder.CreateFMul(LHS.value, RHS.value), val.value);
+				lBuilder.CreateStore(lBuilder.CreateFMul(LHS, RHS), alloc);
 				return val;
 			}
 			throw err("unknown operator *= for type: " + type_names[type]);
 		}},
 		{ "%\\%=%", right_asl, [](gen_node& syntax_node, AST_context* context){
 			auto val = syntax_node[0].code_gen(context);
-			auto LHS = rvalue(val);
-			val = lvalue(val);
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
-			auto type = LHS.value->getType();
-			create_static_cast(RHS.value, type);
+			auto alloc = val.get_lvalue();
+			auto LHS = val.get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
+			auto type = LHS->getType();
+			create_static_cast(RHS, type);
 			if (type == int_type || type == bool_type || type == char_type)
 			{
-				lBuilder.CreateStore(lBuilder.CreateSRem(LHS.value, RHS.value), val.value);
+				lBuilder.CreateStore(lBuilder.CreateSRem(LHS, RHS), alloc);
 				return val;
 			}
 			throw err("unknown operator %= for type: " + type_names[type]);
 		}},
 		{ "%+=%", right_asl, [](gen_node& syntax_node, AST_context* context){
 			auto val = syntax_node[0].code_gen(context);
-			auto LHS = rvalue(val);
-			val = lvalue(val);
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
-			auto type = LHS.value->getType();
-			create_static_cast(RHS.value, type);
+			auto alloc = val.get_lvalue();
+			auto LHS = val.get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
+			auto type = LHS->getType();
+			create_static_cast(RHS, type);
 			if (type == int_type || type == bool_type || type == char_type)
 			{
-				lBuilder.CreateStore(lBuilder.CreateAdd(LHS.value, RHS.value), val.value);
+				lBuilder.CreateStore(lBuilder.CreateAdd(LHS, RHS), alloc);
 				return val;
 			}
 			else if (type == float_type)
 			{
-				lBuilder.CreateStore(lBuilder.CreateFAdd(LHS.value, RHS.value), val.value);
+				lBuilder.CreateStore(lBuilder.CreateFAdd(LHS, RHS), alloc);
 				return val;
 			}
 			throw err("unknown operator += for type: " + type_names[type]);
 		}},
 		{ "%-=%", right_asl, [](gen_node& syntax_node, AST_context* context){
 			auto val = syntax_node[0].code_gen(context);
-			auto LHS = rvalue(val);
-			val = lvalue(val);
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
-			auto type = LHS.value->getType();
-			create_static_cast(RHS.value, type);
+			auto alloc = val.get_lvalue();
+			auto LHS = val.get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
+			auto type = LHS->getType();
+			create_static_cast(RHS, type);
 			if (type == int_type || type == bool_type || type == char_type)
 			{
-				lBuilder.CreateStore(lBuilder.CreateSub(LHS.value, RHS.value), val.value);
+				lBuilder.CreateStore(lBuilder.CreateSub(LHS, RHS), alloc);
 				return val;
 			}
 			else if (type == float_type)
 			{
-				lBuilder.CreateStore(lBuilder.CreateFSub(LHS.value, RHS.value), val.value);
+				lBuilder.CreateStore(lBuilder.CreateFSub(LHS, RHS), alloc);
 				return val;
 			}
 			throw err("unknown operator -= for type: " + type_names[type]);
 		}},
 		{ "%<<=%", right_asl, [](gen_node& syntax_node, AST_context* context){
 			auto val = syntax_node[0].code_gen(context);
-			auto LHS = rvalue(val);
-			val = lvalue(val);
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
-			auto type = LHS.value->getType();
-			create_static_cast(RHS.value, type);
+			auto alloc = val.get_lvalue();
+			auto LHS = val.get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
+			auto type = LHS->getType();
+			create_static_cast(RHS, type);
 			if (type == int_type || type == bool_type || type == char_type)
 			{
-				lBuilder.CreateStore(lBuilder.CreateShl(LHS.value, RHS.value), val.value);
+				lBuilder.CreateStore(lBuilder.CreateShl(LHS, RHS), alloc);
 				return val;
 			}
 			throw err("unknown operator <<= for type: " + type_names[type]);
 		}},
 		{ "%>>=%", right_asl, [](gen_node& syntax_node, AST_context* context){
 			auto val = syntax_node[0].code_gen(context);
-			auto LHS = rvalue(val);
-			val = lvalue(val);
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
-			auto type = LHS.value->getType();
-			create_static_cast(RHS.value, type);
+			auto alloc = val.get_lvalue();
+			auto LHS = val.get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
+			auto type = LHS->getType();
+			create_static_cast(RHS, type);
 			if (type == int_type || type == bool_type || type == char_type)
 			{
-				lBuilder.CreateStore(lBuilder.CreateAShr(LHS.value, RHS.value), val.value);
+				lBuilder.CreateStore(lBuilder.CreateAShr(LHS, RHS), alloc);
 				return val;
 			}
 			throw err("unknown operator >>= for type: " + type_names[type]);
 		}},
 		{ "%&=%", right_asl, [](gen_node& syntax_node, AST_context* context){
 			auto val = syntax_node[0].code_gen(context);
-			auto LHS = rvalue(val);
-			val = lvalue(val);
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
-			auto type = LHS.value->getType();
-			create_static_cast(RHS.value, type);
+			auto alloc = val.get_lvalue();
+			auto LHS = val.get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
+			auto type = LHS->getType();
+			create_static_cast(RHS, type);
 			if (type == int_type || type == bool_type || type == char_type)
 			{
-				lBuilder.CreateStore(lBuilder.CreateAnd(LHS.value, RHS.value), val.value);
+				lBuilder.CreateStore(lBuilder.CreateAnd(LHS, RHS), alloc);
 				return val;
 			}
 			throw err("unknown operator &= for type: " + type_names[type]);
 		}},
 		{ "%^=%", right_asl, [](gen_node& syntax_node, AST_context* context){
 			auto val = syntax_node[0].code_gen(context);
-			auto LHS = rvalue(val);
-			val = lvalue(val);
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
-			auto type = LHS.value->getType();
-			create_static_cast(RHS.value, type);
+			auto alloc = val.get_lvalue();
+			auto LHS = val.get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
+			auto type = LHS->getType();
+			create_static_cast(RHS, type);
 			if (type == int_type || type == bool_type || type == char_type)
 			{
-				lBuilder.CreateStore(lBuilder.CreateXor(LHS.value, RHS.value), val.value);
+				lBuilder.CreateStore(lBuilder.CreateXor(LHS, RHS), alloc);
 				return val;
 			}
 			throw err("unknown operator ^= for type: " + type_names[type]);
 		}},
 		{ "%|=%", right_asl, [](gen_node& syntax_node, AST_context* context){
 			auto val = syntax_node[0].code_gen(context);
-			auto LHS = rvalue(val);
-			val = lvalue(val);
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
-			auto type = LHS.value->getType();
-			create_static_cast(RHS.value, type);
+			auto alloc = val.get_lvalue();
+			auto LHS = val.get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
+			auto type = LHS->getType();
+			create_static_cast(RHS, type);
 			if (type == int_type || type == bool_type || type == char_type)
 			{
-				lBuilder.CreateStore(lBuilder.CreateOr(LHS.value, RHS.value), val.value);
+				lBuilder.CreateStore(lBuilder.CreateOr(LHS, RHS), alloc);
 				return val;
 			}
 			throw err("unknown operator |= for type: " + type_names[type]);
@@ -282,15 +282,15 @@ parser::expr_init_rules mexpr_rules =
 			auto then_block = context->new_block("then");
 			auto else_block = context->new_block("else");
 			auto merge_block = context->new_block("endif");
-			context->cond_jump_to(rvalue(syntax_node[0].code_gen(context)).value, then_block, else_block);
+			context->cond_jump_to(syntax_node[0].code_gen(context).get_rvalue(), then_block, else_block);
 			
 			context->set_block(then_block);
-			Value* then_value = rvalue(syntax_node[1].code_gen(context)).value;
+			Value* then_value = syntax_node[1].code_gen(context).get_rvalue();
 			then_block = context->get_block();
 			context->jump_to(merge_block);
 			
 			context->set_block(else_block);
-			Value* else_value = rvalue(syntax_node[2].code_gen(context)).value;
+			Value* else_value = syntax_node[2].code_gen(context).get_rvalue();
 			then_block = context->get_block();
 			context->jump_to(merge_block);
 			
@@ -304,30 +304,30 @@ parser::expr_init_rules mexpr_rules =
 	
 	{
 		{ "%||%", left_asl, [](gen_node& syntax_node, AST_context* context){
-			auto LHS = rvalue(syntax_node[0].code_gen(context));
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
+			auto LHS = syntax_node[0].code_gen(context).get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto key = binary_sync_cast(LHS, RHS, bool_type);
-			return AST_result(lBuilder.CreateOr(LHS.value, RHS.value), false);
+			return AST_result(lBuilder.CreateOr(LHS, RHS), false);
 		}}
 	},
 	
 	{
 		{ "%&&%", left_asl, [](gen_node& syntax_node, AST_context* context){
-			auto LHS = rvalue(syntax_node[0].code_gen(context));
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
+			auto LHS = syntax_node[0].code_gen(context).get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto key = binary_sync_cast(LHS, RHS, bool_type);
-			return AST_result(lBuilder.CreateAnd(LHS.value, RHS.value), false);
+			return AST_result(lBuilder.CreateAnd(LHS, RHS), false);
 		}}
 	},
 	
 	{
 		{ "%|%", left_asl, [](gen_node& syntax_node, AST_context* context){
-			auto LHS = rvalue(syntax_node[0].code_gen(context));
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
+			auto LHS = syntax_node[0].code_gen(context).get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto key = binary_sync_cast(LHS, RHS);
 			if (key == int_type || key == bool_type || key == char_type)
 			{
-				return AST_result(lBuilder.CreateOr(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateOr(LHS, RHS), false);
 			}
 			throw err("unknown operator | for type: " + type_names[key]);
 		}}
@@ -335,12 +335,12 @@ parser::expr_init_rules mexpr_rules =
 	
 	{
 		{ "%^%", left_asl, [](gen_node& syntax_node, AST_context* context){
-			auto LHS = rvalue(syntax_node[0].code_gen(context));
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
+			auto LHS = syntax_node[0].code_gen(context).get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto key = binary_sync_cast(LHS, RHS);
 			if (key == int_type || key == bool_type || key == char_type)
 			{
-				return AST_result(lBuilder.CreateXor(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateXor(LHS, RHS), false);
 			}
 			throw err("unknown operator ^ for type: " + type_names[key]);
 		}}
@@ -348,12 +348,12 @@ parser::expr_init_rules mexpr_rules =
 	
 	{
 		{ "%&%", left_asl, [](gen_node& syntax_node, AST_context* context){
-			auto LHS = rvalue(syntax_node[0].code_gen(context));
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
+			auto LHS = syntax_node[0].code_gen(context).get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto key = binary_sync_cast(LHS, RHS);
 			if (key == int_type || key == bool_type || key == char_type)
 			{
-				return AST_result(lBuilder.CreateAnd(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateAnd(LHS, RHS), false);
 			}
 			throw err("unknown operator & for type: " + type_names[key]);
 		}}
@@ -361,30 +361,30 @@ parser::expr_init_rules mexpr_rules =
 	
 	{
 		{ "%==%", left_asl, [](gen_node& syntax_node, AST_context* context){
-			auto LHS = rvalue(syntax_node[0].code_gen(context));
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
+			auto LHS = syntax_node[0].code_gen(context).get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto key = binary_sync_cast(LHS, RHS);
 			if (key == int_type || key == bool_type || key == char_type)
 			{
-				return AST_result(lBuilder.CreateICmpEQ(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateICmpEQ(LHS, RHS), false);
 			}
 			if (key == float_type)
 			{
-				return AST_result(lBuilder.CreateFCmpOEQ(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateFCmpOEQ(LHS, RHS), false);
 			}
 			throw err("unknown operator == for type: " + type_names[key]);
 		}},
 		{ "%!=%", left_asl, [](gen_node& syntax_node, AST_context* context){
-			auto LHS = rvalue(syntax_node[0].code_gen(context));
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
+			auto LHS = syntax_node[0].code_gen(context).get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto key = binary_sync_cast(LHS, RHS);
 			if (key == int_type || key == bool_type || key == char_type)
 			{
-				return AST_result(lBuilder.CreateICmpNE(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateICmpNE(LHS, RHS), false);
 			}
 			if (key == float_type)
 			{
-				return AST_result(lBuilder.CreateFCmpONE(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateFCmpONE(LHS, RHS), false);
 			}
 			throw err("unknown operator != for type: " + type_names[key]);
 		}}
@@ -392,58 +392,58 @@ parser::expr_init_rules mexpr_rules =
 	
 	{
 		{ "%>%", left_asl, [](gen_node& syntax_node, AST_context* context){
-			auto LHS = rvalue(syntax_node[0].code_gen(context));
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
+			auto LHS = syntax_node[0].code_gen(context).get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto key = binary_sync_cast(LHS, RHS);
 			if (key == int_type || key == bool_type || key == char_type)
 			{
-				return AST_result(lBuilder.CreateICmpSGT(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateICmpSGT(LHS, RHS), false);
 			}
 			if (key == float_type)
 			{
-				return AST_result(lBuilder.CreateFCmpOGT(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateFCmpOGT(LHS, RHS), false);
 			}
 			throw err("unknown operator > for type: " + type_names[key]);
 		}},
 		{ "%>=%", left_asl, [](gen_node& syntax_node, AST_context* context){
-			auto LHS = rvalue(syntax_node[0].code_gen(context));
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
+			auto LHS = syntax_node[0].code_gen(context).get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto key = binary_sync_cast(LHS, RHS);
 			if (key == int_type || key == bool_type || key == char_type)
 			{
-				return AST_result(lBuilder.CreateICmpSGE(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateICmpSGE(LHS, RHS), false);
 			}
 			if (key == float_type)
 			{
-				return AST_result(lBuilder.CreateFCmpOGE(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateFCmpOGE(LHS, RHS), false);
 			}
 			throw err("unknown operator >= for type: " + type_names[key]);
 		}},
 		{ "%<%", left_asl, [](gen_node& syntax_node, AST_context* context){
-			auto LHS = rvalue(syntax_node[0].code_gen(context));
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
+			auto LHS = syntax_node[0].code_gen(context).get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto key = binary_sync_cast(LHS, RHS);
 			if (key == int_type || key == bool_type || key == char_type)
 			{
-				return AST_result(lBuilder.CreateICmpSLT(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateICmpSLT(LHS, RHS), false);
 			}
 			if (key == float_type)
 			{
-				return AST_result(lBuilder.CreateFCmpOLT(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateFCmpOLT(LHS, RHS), false);
 			}
 			throw err("unknown operator < for type: " + type_names[key]);
 		}},
 		{ "%<=%", left_asl, [](gen_node& syntax_node, AST_context* context){
-			auto LHS = rvalue(syntax_node[0].code_gen(context));
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
+			auto LHS = syntax_node[0].code_gen(context).get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto key = binary_sync_cast(LHS, RHS);
 			if (key == int_type || key == bool_type || key == char_type)
 			{
-				return AST_result(lBuilder.CreateICmpSLE(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateICmpSLE(LHS, RHS), false);
 			}
 			if (key == float_type)
 			{
-				return AST_result(lBuilder.CreateFCmpOLE(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateFCmpOLE(LHS, RHS), false);
 			}
 			throw err("unknown operator <= for type: " + type_names[key]);
 		}}
@@ -451,22 +451,22 @@ parser::expr_init_rules mexpr_rules =
 	
 	{
 		{ "%<<%", left_asl, [](gen_node& syntax_node, AST_context* context){
-			auto LHS = rvalue(syntax_node[0].code_gen(context));
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
+			auto LHS = syntax_node[0].code_gen(context).get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto key = binary_sync_cast(LHS, RHS);
 			if (key == int_type || key == bool_type || key == char_type)
 			{
-				return AST_result(lBuilder.CreateShl(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateShl(LHS, RHS), false);
 			}
 			throw err("unknown operator << for type: " + type_names[key]);
 		}},
 		{ "%>>%", left_asl, [](gen_node& syntax_node, AST_context* context){
-			auto LHS = rvalue(syntax_node[0].code_gen(context));
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
+			auto LHS = syntax_node[0].code_gen(context).get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto key = binary_sync_cast(LHS, RHS);
 			if (key == int_type || key == bool_type || key == char_type)
 			{
-				return AST_result(lBuilder.CreateAShr(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateAShr(LHS, RHS), false);
 			}
 			throw err("unknown operator >> for type: " + type_names[key]);
 		}}
@@ -474,30 +474,30 @@ parser::expr_init_rules mexpr_rules =
 	
 	{
 		{ "%+%", left_asl, [](gen_node& syntax_node, AST_context* context){
-			auto LHS = rvalue(syntax_node[0].code_gen(context));
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
+			auto LHS = syntax_node[0].code_gen(context).get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto key = binary_sync_cast(LHS, RHS);
 			if (key == int_type || key == bool_type || key == char_type)
 			{
-				return AST_result(lBuilder.CreateAdd(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateAdd(LHS, RHS), false);
 			}
 			else if (key == float_type)
 			{
-				return AST_result(lBuilder.CreateFAdd(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateFAdd(LHS, RHS), false);
 			}
 			throw err("unknown operator + for type: " + type_names[key]);
 		}},
 		{ "%-%", left_asl, [](gen_node& syntax_node, AST_context* context){
-			auto LHS = rvalue(syntax_node[0].code_gen(context));
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
+			auto LHS = syntax_node[0].code_gen(context).get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto key = binary_sync_cast(LHS, RHS);
 			if (key == int_type || key == bool_type || key == char_type)
 			{
-				return AST_result(lBuilder.CreateSub(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateSub(LHS, RHS), false);
 			}
 			else if (key == float_type)
 			{
-				return AST_result(lBuilder.CreateFSub(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateFSub(LHS, RHS), false);
 			}
 			throw err("unknown operator - for type: " + type_names[key]);
 		}}
@@ -505,40 +505,40 @@ parser::expr_init_rules mexpr_rules =
 	
 	{
 		{ "%/%", left_asl, [](gen_node& syntax_node, AST_context* context){
-			auto LHS = rvalue(syntax_node[0].code_gen(context));
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
+			auto LHS = syntax_node[0].code_gen(context).get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto key = binary_sync_cast(LHS, RHS);
 			if (key == int_type || key == bool_type || key == char_type)
 			{
-				return AST_result(lBuilder.CreateSDiv(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateSDiv(LHS, RHS), false);
 			}
 			else if (key == float_type)
 			{
-				return AST_result(lBuilder.CreateFDiv(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateFDiv(LHS, RHS), false);
 			}
 			throw err("unknown operator / for type: " + type_names[key]);
 		}},
 		{ "%*%", left_asl, [](gen_node& syntax_node, AST_context* context){	
-			auto LHS = rvalue(syntax_node[0].code_gen(context));
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
+			auto LHS = syntax_node[0].code_gen(context).get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto key = binary_sync_cast(LHS, RHS);
 			if (key == int_type || key == bool_type || key == char_type)
 			{
-				return AST_result(lBuilder.CreateMul(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateMul(LHS, RHS), false);
 			}
 			else if (key == float_type)
 			{
-				return AST_result(lBuilder.CreateFMul(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateFMul(LHS, RHS), false);
 			}
 			throw err("unknown operator * for type: " + type_names[key]);
 		}},
 		{ "%\\%%", left_asl, [](gen_node& syntax_node, AST_context* context){
-			auto LHS = rvalue(syntax_node[0].code_gen(context));
-			auto RHS = rvalue(syntax_node[1].code_gen(context));
+			auto LHS = syntax_node[0].code_gen(context).get_rvalue();
+			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto key = binary_sync_cast(LHS, RHS);
 			if (key == int_type || key == bool_type || key == char_type)
 			{
-				return AST_result(lBuilder.CreateSRem(LHS.value, RHS.value), false);
+				return AST_result(lBuilder.CreateSRem(LHS, RHS), false);
 			}
 			throw err("unknown operator % for type: " + type_names[key]);
 		}}
@@ -546,22 +546,21 @@ parser::expr_init_rules mexpr_rules =
 	
 	{
 		{ "-%", right_asl, [](gen_node& syntax_node, AST_context* context){
-			auto RHS = rvalue(syntax_node[0].code_gen(context));
-			auto key = RHS.value->getType();
+			auto RHS = syntax_node[0].code_gen(context).get_rvalue();
+			auto key = RHS->getType();
 			if (key == int_type || key == bool_type || key == char_type)
 			{
-				return AST_result(lBuilder.CreateNeg(RHS.value), false);
+				return AST_result(lBuilder.CreateNeg(RHS), false);
 			}
 			else if (key == float_type)
 			{
-				return AST_result(lBuilder.CreateFNeg(RHS.value), false);
+				return AST_result(lBuilder.CreateFNeg(RHS), false);
 			}
 			throw err("unknown operator - for type: " + type_names[key]);
 		}},
 		{ "!%", right_asl, [](gen_node& syntax_node, AST_context* context){
-			auto RHS = rvalue(syntax_node[0].code_gen(context));
-			create_static_cast(RHS.value, bool_type);
-			return AST_result(lBuilder.CreateNot(RHS.value), false);
+			auto RHS = syntax_node[0].code_gen(context).get_rvalue();
+			return AST_result(lBuilder.CreateNot(create_static_cast(RHS, bool_type)), false);
 		}},
 		/*{
 			"~%", right_asl
@@ -569,13 +568,10 @@ parser::expr_init_rules mexpr_rules =
 	},
 	
 	{
-		/*
-		{
-			"%[%pk]", left_asl
-		},*/
+		{ "%[%pk]", left_asl, parser::forward },
 		{ "%(%pk)", left_asl, [](gen_node& syntax_node, AST_context* context){	
-			auto function = func(syntax_node[0].code_gen(context)).function;
-			auto params = reinterpret_cast<std::vector<Value*>*>(syntax_node[1].code_gen(context).custom_data);
+			auto function = syntax_node[0].code_gen(context).get_function();
+			auto params = syntax_node[1].code_gen(context).get_data<std::vector<Value*>>();
 			auto function_proto = function->getFunctionType();
 			if (function_proto->getNumParams() != params->size())
 				throw err("function param number mismatch");
@@ -607,15 +603,15 @@ parser::init_rules mparse_rules =
 	{ "TypeDefine", {
 		{ "type Id = Type;", [](gen_node& syntax_node, AST_context* context){
 			context->add_type(static_cast<term_node&>(syntax_node[0]).data.attr->value,
-				syntax_node[1].code_gen(context).type);
+				syntax_node[1].code_gen(context).get_type());
 			return AST_result();
 		}}
 	}},
 	{ "Function", {
 		{ "Type Id ( FunctionParams ) { Block }", [](gen_node& syntax_node, AST_context* context){
-			function_params* p = reinterpret_cast<function_params*>(syntax_node[2].code_gen(context).custom_data);
+			function_params* p = syntax_node[2].code_gen(context).get_data<function_params>();
 			auto& name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
-			FunctionType *FT = FunctionType::get(syntax_node[0].code_gen(context).type, p->first, false);
+			FunctionType *FT = FunctionType::get(syntax_node[0].code_gen(context).get_type(), p->first, false);
 			Function* F = Function::Create(FT, Function::ExternalLinkage, name, lModule);
 			context->add_func(name, F);
 			AST_context new_context(context, F);
@@ -631,7 +627,7 @@ parser::init_rules mparse_rules =
 			return AST_result();
 		}},
 		{ "Id ( FunctionParams ) { Block }", [](gen_node& syntax_node, AST_context* context){
-			function_params* p = reinterpret_cast<function_params*>(syntax_node[1].code_gen(context).custom_data);
+			function_params* p = syntax_node[1].code_gen(context).get_data<function_params>();
 			auto& name = static_cast<term_node&>(syntax_node[0]).data.attr->value;
 			FunctionType *FT = FunctionType::get(void_type, p->first, false);
 			Function* F = Function::Create(FT, Function::ExternalLinkage, name, lModule);
@@ -655,23 +651,25 @@ parser::init_rules mparse_rules =
 	}},
 	{ "FunctionParamList", {
 		{ "FunctionParamList , Type Id", [](gen_node& syntax_node, AST_context* context){
-			function_params* p = reinterpret_cast<function_params*>(syntax_node[0].code_gen(context).custom_data);
-			p->first.push_back(syntax_node[1].code_gen(context).type);
+			function_params* p = syntax_node[0].code_gen(context).get_data<function_params>();
+			p->first.push_back(syntax_node[1].code_gen(context).get_type());
 			p->second.push_back(&static_cast<term_node&>(syntax_node[2]).data);
 			return AST_result(p);
 		}},
 		{ "Type Id", [](gen_node& syntax_node, AST_context* context){
 			function_params* p = new function_params;
-			p->first.push_back(syntax_node[0].code_gen(context).type);
+			p->first.push_back(syntax_node[0].code_gen(context).get_type());
 			p->second.push_back(&static_cast<term_node&>(syntax_node[1]).data);
 			return AST_result(p);
 		}},
 	}},
 	{ "GlobalVarDefine", {
-		{ "Type Id;", [](gen_node& syntax_node, AST_context* context){
-			Type* type = syntax_node[0].code_gen(context).type;
-			lBuilder.CreateStore((Constant*)initialize(type),
-				context->alloc_var(type, static_cast<term_node&>(syntax_node[1]).data.attr->value));
+		{ "Type Id GlobalInitExpr;", [](gen_node& syntax_node, AST_context* context){
+			Type* type = syntax_node[0].code_gen(context).get_type();
+			auto init_expr = syntax_node[2].code_gen(context);
+			Constant* init = static_cast<Constant*>(init_expr.flag != AST_result::is_none ?
+				create_static_cast(init_expr.get_rvalue(), type) : initialize(type));
+			lBuilder.CreateStore(init, context->alloc_var(type, static_cast<term_node&>(syntax_node[1]).data.attr->value));
 			return AST_result();
 		}}
 	}},
@@ -679,7 +677,15 @@ parser::init_rules mparse_rules =
 		{ "= expr", parser::forward },
 		{ "", parser::empty }
 	}},
+	{ "GlobalInitExpr", {
+		{ "= constexpr", parser::forward },
+		{ "", parser::empty }
+	}},
 	{ "Type", {
+		{ "Type [ constexpr ]", [](gen_node& syntax_node, AST_context* context){
+			return AST_result(/*llvm::ArrayType::get(syntax_node[0].code_gen(context).get_type(),
+				syntax_node[1].code_gen(context).get_rvalue())*/);
+		}}, 
 		{ "int", parser::forward },
 		{ "float", parser::forward },
 		{ "char", parser::forward },
@@ -697,7 +703,7 @@ parser::init_rules mparse_rules =
 			auto merge_block = context->loop_end = context->new_block("endwhile");
 			
 			context->set_block(cond_block);
-			context->cond_jump_to(rvalue(syntax_node[0].code_gen(context)).value, body_block, merge_block);
+			context->cond_jump_to(syntax_node[0].code_gen(context).get_rvalue(), body_block, merge_block);
 			
 			context->set_block(body_block);
 			syntax_node[1].code_gen(context);
@@ -712,7 +718,7 @@ parser::init_rules mparse_rules =
 			auto then_block = context->new_block("then");
 			auto else_block = context->new_block("else");
 			auto merge_block = context->new_block("endif");
-			context->cond_jump_to(rvalue(syntax_node[0].code_gen(context)).value, then_block, else_block);
+			context->cond_jump_to(syntax_node[0].code_gen(context).get_rvalue(), then_block, else_block);
 			
 			context->set_block(then_block);
 			syntax_node[1].code_gen(context);
@@ -726,10 +732,10 @@ parser::init_rules mparse_rules =
 			return AST_result();
 		}},
 		{ "Type Id InitExpr;", [](gen_node& syntax_node, AST_context* context){
-			Type* type = syntax_node[0].code_gen(context).type;
+			Type* type = syntax_node[0].code_gen(context).get_type();
 			auto init_expr = syntax_node[2].code_gen(context);
 			Value* init = init_expr.flag != AST_result::is_none ?
-				create_static_cast(rvalue(init_expr).value, type) : initialize(type);
+				create_static_cast(init_expr.get_rvalue(), type) : initialize(type);
 			auto alloc = context->alloc_var(type, static_cast<term_node&>(syntax_node[1]).data.attr->value);
 			lBuilder.CreateStore(init, alloc);
 			return AST_result();
@@ -742,7 +748,7 @@ parser::init_rules mparse_rules =
 			return AST_result();
 		}},
 		{ "return expr;", [](gen_node& syntax_node, AST_context* context){
-			context->leave_function(rvalue(syntax_node[0].code_gen(context)).value);
+			context->leave_function(syntax_node[0].code_gen(context).get_rvalue());
 			return AST_result();
 		}},
 		{ "return;", parser::forward },
@@ -757,6 +763,17 @@ parser::init_rules mparse_rules =
 	{ "exprelem", {
 		{ "( expr )", parser::forward },
 		{ "Id", parser::forward },
+		{ "Dec", parser::forward },
+		{ "Hex", parser::forward },
+		{ "Oct", parser::forward },
+		{ "Float", parser::forward },
+		{ "Scientific", parser::forward },
+		{ "true", parser::forward },
+		{ "false", parser::forward },
+	}},
+	{ "constexprelem", {
+		{ "( expr )", parser::forward },
+		//{ "Id", parser::forward },
 		{ "Dec", parser::forward },
 		{ "Hex", parser::forward },
 		{ "Oct", parser::forward },
