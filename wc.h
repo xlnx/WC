@@ -19,10 +19,11 @@ lexer::init_rules mlex_rules =
 		{ "if", "if", {word, no_attr} },
 		{ "else", "else", {word, no_attr} },
 		{ "for", "for", {word, no_attr} },
-		{ "true", "true", {word, no_attr} },
-		{ "false", "false", {word, no_attr} },
+		{ "true", "true", {word} },
+		{ "false", "false", {word} },
 		//
 		{ "type", "type", {word, no_attr} },
+		{ "class", "class", {word, no_attr} },
 		//
 		{ "return", "return", {word} },
 		{ "break", "break", {word} },
@@ -111,7 +112,7 @@ parser::expr_init_rules mexpr_rules =
 			auto val = syntax_node[0].code_gen(context);
 			auto LHS = val.get_lvalue();
 			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
-			RHS = create_static_cast(RHS, static_cast<AllocaInst*>(LHS)->getAllocatedType());
+			RHS = create_implicit_cast(RHS, static_cast<AllocaInst*>(LHS)->getAllocatedType());
 			lBuilder.CreateStore(RHS, LHS);
 			return val;
 		}},
@@ -121,7 +122,7 @@ parser::expr_init_rules mexpr_rules =
 			auto LHS = val.get_rvalue();
 			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto type = LHS->getType();
-			create_static_cast(RHS, type);
+			create_implicit_cast(RHS, type);
 			if (type == int_type || type == bool_type || type == char_type)
 			{
 				lBuilder.CreateStore(lBuilder.CreateSDiv(LHS, RHS), alloc);
@@ -140,7 +141,7 @@ parser::expr_init_rules mexpr_rules =
 			auto LHS = val.get_rvalue();
 			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto type = LHS->getType();
-			create_static_cast(RHS, type);
+			create_implicit_cast(RHS, type);
 			if (type == int_type || type == bool_type || type == char_type)
 			{
 				lBuilder.CreateStore(lBuilder.CreateMul(LHS, RHS), alloc);
@@ -159,7 +160,7 @@ parser::expr_init_rules mexpr_rules =
 			auto LHS = val.get_rvalue();
 			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto type = LHS->getType();
-			create_static_cast(RHS, type);
+			create_implicit_cast(RHS, type);
 			if (type == int_type || type == bool_type || type == char_type)
 			{
 				lBuilder.CreateStore(lBuilder.CreateSRem(LHS, RHS), alloc);
@@ -173,7 +174,7 @@ parser::expr_init_rules mexpr_rules =
 			auto LHS = val.get_rvalue();
 			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto type = LHS->getType();
-			create_static_cast(RHS, type);
+			create_implicit_cast(RHS, type);
 			if (type == int_type || type == bool_type || type == char_type)
 			{
 				lBuilder.CreateStore(lBuilder.CreateAdd(LHS, RHS), alloc);
@@ -192,7 +193,7 @@ parser::expr_init_rules mexpr_rules =
 			auto LHS = val.get_rvalue();
 			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto type = LHS->getType();
-			create_static_cast(RHS, type);
+			create_implicit_cast(RHS, type);
 			if (type == int_type || type == bool_type || type == char_type)
 			{
 				lBuilder.CreateStore(lBuilder.CreateSub(LHS, RHS), alloc);
@@ -211,7 +212,7 @@ parser::expr_init_rules mexpr_rules =
 			auto LHS = val.get_rvalue();
 			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto type = LHS->getType();
-			create_static_cast(RHS, type);
+			create_implicit_cast(RHS, type);
 			if (type == int_type || type == bool_type || type == char_type)
 			{
 				lBuilder.CreateStore(lBuilder.CreateShl(LHS, RHS), alloc);
@@ -225,7 +226,7 @@ parser::expr_init_rules mexpr_rules =
 			auto LHS = val.get_rvalue();
 			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto type = LHS->getType();
-			create_static_cast(RHS, type);
+			create_implicit_cast(RHS, type);
 			if (type == int_type || type == bool_type || type == char_type)
 			{
 				lBuilder.CreateStore(lBuilder.CreateAShr(LHS, RHS), alloc);
@@ -239,7 +240,7 @@ parser::expr_init_rules mexpr_rules =
 			auto LHS = val.get_rvalue();
 			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto type = LHS->getType();
-			create_static_cast(RHS, type);
+			create_implicit_cast(RHS, type);
 			if (type == int_type || type == bool_type || type == char_type)
 			{
 				lBuilder.CreateStore(lBuilder.CreateAnd(LHS, RHS), alloc);
@@ -253,7 +254,7 @@ parser::expr_init_rules mexpr_rules =
 			auto LHS = val.get_rvalue();
 			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto type = LHS->getType();
-			create_static_cast(RHS, type);
+			create_implicit_cast(RHS, type);
 			if (type == int_type || type == bool_type || type == char_type)
 			{
 				lBuilder.CreateStore(lBuilder.CreateXor(LHS, RHS), alloc);
@@ -267,7 +268,7 @@ parser::expr_init_rules mexpr_rules =
 			auto LHS = val.get_rvalue();
 			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
 			auto type = LHS->getType();
-			create_static_cast(RHS, type);
+			create_implicit_cast(RHS, type);
 			if (type == int_type || type == bool_type || type == char_type)
 			{
 				lBuilder.CreateStore(lBuilder.CreateOr(LHS, RHS), alloc);
@@ -279,9 +280,9 @@ parser::expr_init_rules mexpr_rules =
 	
 	{
 		{ "%?%:%", right_asl, [](gen_node& syntax_node, AST_context* context){
-			auto then_block = context->new_block("then");
-			auto else_block = context->new_block("else");
-			auto merge_block = context->new_block("endif");
+			auto then_block = AST_context::new_block("then");
+			auto else_block = AST_context::new_block("else");
+			auto merge_block = AST_context::new_block("endif");
 			context->cond_jump_to(syntax_node[0].code_gen(context).get_rvalue(), then_block, else_block);
 			
 			context->set_block(then_block);
@@ -560,7 +561,7 @@ parser::expr_init_rules mexpr_rules =
 		}},
 		{ "!%", right_asl, [](gen_node& syntax_node, AST_context* context){
 			auto RHS = syntax_node[0].code_gen(context).get_rvalue();
-			return AST_result(lBuilder.CreateNot(create_static_cast(RHS, bool_type)), false);
+			return AST_result(lBuilder.CreateNot(create_implicit_cast(RHS, bool_type)), false);
 		}},
 		/*{
 			"~%", right_asl
@@ -576,7 +577,7 @@ parser::expr_init_rules mexpr_rules =
 			if (function_proto->getNumParams() != params->size())
 				throw err("function param number mismatch");
 			for (unsigned i = 0; i < params->size(); ++i)
-				(*params)[i] = create_static_cast((*params)[i], function_proto->getParamType(i));
+				(*params)[i] = create_implicit_cast((*params)[i], function_proto->getParamType(i));
 			auto call_inst = lBuilder.CreateCall(function, *params);
 			delete params;
 			return AST_result(call_inst, false);
@@ -598,12 +599,13 @@ parser::init_rules mparse_rules =
 	{ "GlobalItem", {
 		{ "Function", parser::forward },
 		{ "TypeDefine", parser::forward },
+		{ "ClassDefine", parser::forward },
 		{ "GlobalVarDefine", parser::forward }
 	}},
 	{ "TypeDefine", {
 		{ "type Id = Type;", [](gen_node& syntax_node, AST_context* context){
-			context->add_type(static_cast<term_node&>(syntax_node[0]).data.attr->value,
-				syntax_node[1].code_gen(context).get_type());
+			context->add_type(syntax_node[1].code_gen(context).get_type(),
+				static_cast<term_node&>(syntax_node[0]).data.attr->value);
 			return AST_result();
 		}}
 	}},
@@ -613,7 +615,7 @@ parser::init_rules mparse_rules =
 			auto& name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
 			FunctionType *FT = FunctionType::get(syntax_node[0].code_gen(context).get_type(), p->first, false);
 			Function* F = Function::Create(FT, Function::ExternalLinkage, name, lModule);
-			context->add_func(name, F);
+			context->add_func(F, name);
 			AST_context new_context(context, F);
 			new_context.activate();
 			unsigned i = 0;
@@ -631,7 +633,7 @@ parser::init_rules mparse_rules =
 			auto& name = static_cast<term_node&>(syntax_node[0]).data.attr->value;
 			FunctionType *FT = FunctionType::get(void_type, p->first, false);
 			Function* F = Function::Create(FT, Function::ExternalLinkage, name, lModule);
-			context->add_func(name, F);
+			context->add_func(F, name);
 			AST_context new_context(context, F);
 			new_context.activate();
 			unsigned i = 0;
@@ -668,10 +670,41 @@ parser::init_rules mparse_rules =
 			Type* type = syntax_node[0].code_gen(context).get_type();
 			auto init_expr = syntax_node[2].code_gen(context);
 			Constant* init = static_cast<Constant*>(init_expr.flag != AST_result::is_none ?
-				init_expr.get_rvalue() : nullptr);		// init this value in static by default
+				init_expr.get_rvalue() : nullptr);		// init this value implicitly by default
 			context->alloc_var(type, static_cast<term_node&>(syntax_node[1]).data.attr->value, init);
 			return AST_result();
 		}}
+	}},
+	{ "ClassDefine", {
+		{ "class Id ClassDeriveList { ClassInterface }", [](gen_node& syntax_node, AST_context* context){
+			auto& class_name =  static_cast<term_node&>(syntax_node[0]).data.attr->value;
+			auto elems = syntax_node[2].code_gen(context).get_data<vector<Type*>>();
+			auto class_type = StructType::create(*elems, class_name);
+			context->add_type(class_type, class_name);
+			/*for (auto itr = class_type->element_begin(); itr != class_type->element_end(); ++itr)
+			{
+				cout << (*itr)->getTypeID() << endl;
+			}*/
+			delete elems;
+			return AST_result();
+		}},
+	}},
+	{ "ClassDeriveList", {
+		{ "", parser::empty }
+	}},
+	{ "ClassInterface", {
+		{ "ClassInterface ClassInterfaceItem", [](gen_node& syntax_node, AST_context* context){
+			auto elems = syntax_node[0].code_gen(context).get_data<vector<Type*>>();
+			elems->push_back(syntax_node[1].code_gen(context).get_type());
+			return AST_result(elems);
+		}},
+		{ "", [](gen_node& syntax_node, AST_context* context){ return AST_result(new vector<Type*>); } }
+	}},
+	{ "ClassInterfaceItem", {
+		{ "Type Id ;", [](gen_node& syntax_node, AST_context* context){
+			auto type = syntax_node[0].code_gen(context).get_type();
+			return AST_result(type);
+		}},
 	}},
 	{ "InitExpr", {
 		{ "= expr", parser::forward },
@@ -684,7 +717,7 @@ parser::init_rules mparse_rules =
 	{ "Type", {
 		{ "Type [ constexpr ]", [](gen_node& syntax_node, AST_context* context){
 			auto type = syntax_node[0].code_gen(context).get_type();
-			auto size = static_cast<ConstantInt*>(create_static_cast(
+			auto size = static_cast<ConstantInt*>(create_implicit_cast(
 				syntax_node[1].code_gen(context).get_rvalue(), int_type));
 			if (size->isNegative()) throw err("negative array size");
 			return AST_result(llvm::ArrayType::get(type, size->getZExtValue()));
@@ -701,9 +734,9 @@ parser::init_rules mparse_rules =
 		{ "while ( expr ) Stmt", [](gen_node& syntax_node, AST_context* context){
 			auto loop_end = context->loop_end;
 			auto loop_next = context->loop_next;
-			auto cond_block = context->loop_next = context->new_block("while_cond");
-			auto body_block = context->new_block("while_body");
-			auto merge_block = context->loop_end = context->new_block("endwhile");
+			auto cond_block = context->loop_next = AST_context::new_block("while_cond");
+			auto body_block = AST_context::new_block("while_body");
+			auto merge_block = context->loop_end = AST_context::new_block("endwhile");
 			
 			context->set_block(cond_block);
 			context->cond_jump_to(syntax_node[0].code_gen(context).get_rvalue(), body_block, merge_block);
@@ -718,9 +751,9 @@ parser::init_rules mparse_rules =
 			return AST_result();
 		}},
 		{ "if ( expr ) Stmt else Stmt", [](gen_node& syntax_node, AST_context* context){	
-			auto then_block = context->new_block("then");
-			auto else_block = context->new_block("else");
-			auto merge_block = context->new_block("endif");
+			auto then_block = AST_context::new_block("then");
+			auto else_block = AST_context::new_block("else");
+			auto merge_block = AST_context::new_block("endif");
 			context->cond_jump_to(syntax_node[0].code_gen(context).get_rvalue(), then_block, else_block);
 			
 			context->set_block(then_block);
@@ -737,8 +770,7 @@ parser::init_rules mparse_rules =
 		{ "Type Id InitExpr;", [](gen_node& syntax_node, AST_context* context){
 			Type* type = syntax_node[0].code_gen(context).get_type();
 			auto init_expr = syntax_node[2].code_gen(context);
-			Value* init = init_expr.flag != AST_result::is_none ?
-				init_expr.get_rvalue() : nullptr;		// will not init
+			Value* init = init_expr.flag != AST_result::is_none ? init_expr.get_rvalue() : nullptr;		// will not init
 			context->alloc_var(type, static_cast<term_node&>(syntax_node[1]).data.attr->value, init);
 			return AST_result();
 		}},

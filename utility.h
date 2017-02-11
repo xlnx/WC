@@ -160,9 +160,9 @@ type_name_lookup type_names =
 };
 
 // use this table to create static cast command
-using static_cast_lookup = std::map<std::pair<llvm::Type*, llvm::Type*>, std::function<llvm::Value*(llvm::Value*)>>;
-using cast_item = static_cast_lookup::value_type;
-static_cast_lookup static_casts =
+using implicit_cast_lookup = std::map<std::pair<llvm::Type*, llvm::Type*>, std::function<llvm::Value*(llvm::Value*)>>;
+using cast_item = implicit_cast_lookup::value_type;
+implicit_cast_lookup implicit_casts =
 {	// cast from int
 	cast_item({int_type, float_type}, [](llvm::Value* v){ return lBuilder.CreateSIToFP(v, float_type); } ),
 	cast_item({int_type, char_type}, [](llvm::Value* v){ return lBuilder.CreateTrunc(v, char_type); } ),
@@ -179,9 +179,9 @@ static_cast_lookup static_casts =
 	cast_item({char_type, bool_type}, [](llvm::Value* v){ return lBuilder.CreateICmpNE(v,
 		llvm::ConstantInt::get(char_type, 0)); } ),
 	// cast from bool
-	cast_item({bool_type, int_type}, [](llvm::Value* v){ return lBuilder.CreateSExt(v, int_type); } ),
-	cast_item({bool_type, float_type}, [](llvm::Value* v){ return lBuilder.CreateSIToFP(v, float_type); } ),
-	cast_item({bool_type, char_type}, [](llvm::Value* v){ return lBuilder.CreateSExt(v, char_type); } ),
+	cast_item({bool_type, int_type}, [](llvm::Value* v){ return lBuilder.CreateZExt(v, int_type); } ),
+	cast_item({bool_type, float_type}, [](llvm::Value* v){ return lBuilder.CreateUIToFP(v, float_type); } ),
+	cast_item({bool_type, char_type}, [](llvm::Value* v){ return lBuilder.CreateZExt(v, char_type); } ),
 };
 
 using cast_priority_map = std::map<llvm::Type*, unsigned>;
@@ -194,13 +194,13 @@ cast_priority_map cast_priority =
 	priority_item(float_type, 3)
 };
 
-llvm::Value* create_static_cast(llvm::Value* value, llvm::Type* type)
+llvm::Value* create_implicit_cast(llvm::Value* value, llvm::Type* type)
 {
 	llvm::Type* cur_type = value->getType();
 	if (cur_type != type)
 	{
 		std::pair<llvm::Type*, llvm::Type*> key = {cur_type, type};
-		if (static_casts[key]) return static_casts[key](value);
+		if (implicit_casts[key]) return implicit_casts[key](value);
 		throw err("cannot cast " + type_names[cur_type] + " to " + type_names[type] + " automatically");
 	}
 	return value;
@@ -218,36 +218,118 @@ llvm::Type* binary_sync_cast(llvm::Value*& LHS, llvm::Value*& RHS, llvm::Type* t
 	if (!type)
 	{
 		auto ltype = LHS->getType(), rtype = RHS->getType();
-		if (cast_priority[ltype] < cast_priority[rtype])
-			LHS= create_static_cast(LHS, rtype);
-		else if (cast_priority[ltype] > cast_priority[rtype])
-			RHS= create_static_cast(RHS, ltype);
+		if (cast_priority[ltype] < cast_priority[rtype]) LHS = create_implicit_cast(LHS, rtype);
+		else if (cast_priority[ltype] > cast_priority[rtype]) RHS = create_implicit_cast(RHS, ltype);
 	}
 	else
 	{
-		LHS = create_static_cast(LHS, type);
-		RHS = create_static_cast(RHS, type);
+		LHS = create_implicit_cast(LHS, type);
+		RHS = create_implicit_cast(RHS, type);
 	}
 	return LHS->getType();
 }
 
-class AST_context
+class AST_namespace;
+class AST_namespace
 {
-	AST_context* parent = nullptr;
+	enum mapped_value_type { is_none = 0, is_type, is_alloc, is_func};
+	std::map<std::string, std::pair<void*, mapped_value_type>> name_map;
+protected:
+	AST_namespace* parent_namespace = nullptr;
+public:
+	AST_namespace() {}
+	AST_namespace(AST_namespace* p): parent_namespace(p) {}
+	/*void check_conflict(const std::string& name)
+	{
+		if (name_map[name].second) throw err("name conflicted: " + name);
+	}*/
+	void add_type(llvm::Type* type, const std::string& name)
+	{
+		switch (name_map[name].second)
+		{
+		case is_type: throw err("redefined type: " + name);
+		default: throw err("name conflicted: " + name);
+		case is_none: name_map[name] = { type, is_type }; 
+		}
+	}
+	void add_alloc(llvm::Value* alloc, const std::string& name)
+	{
+		switch (name_map[name].second)
+		{
+		case is_alloc: throw err("redefined variable: " + name);
+		default: throw err("name conflicted: " + name);
+		case is_none: name_map[name] = { alloc, is_alloc }; 
+		}
+	}
+	void add_func(llvm::Function* func, const std::string& name)
+	{
+		switch (name_map[name].second)
+		{
+		case is_func: throw err("redefined function: " + name);
+		default: throw err("name conflicted: " + name);
+		case is_none: name_map[name] = { func, is_func }; 
+		}
+	}
+	// get type
+	AST_result get_type(const std::string& name)
+	{
+		switch (name_map[name].second)
+		{
+		case is_type: return AST_result(reinterpret_cast<llvm::Type*>(name_map[name].first));
+		case is_none: if (parent_namespace) return parent_namespace->get_type(name);
+			else throw err("undefined type: " + name);
+		default: throw err("name \"" + name + "\" in this context is not typename");
+		}
+	}
+	AST_result get_var(const std::string& name)
+	{
+		switch (name_map[name].second)
+		{
+		case is_alloc: return AST_result(reinterpret_cast<llvm::Value*>(name_map[name].first), true);
+		case is_none: if (parent_namespace) return parent_namespace->get_var(name);
+			else throw err("undefined variable: " + name);
+		default: throw err("name \"" + name + "\" in this context is not variable");
+		}
+	}
+	AST_result get_func(const std::string& name)
+	{
+		switch (name_map[name].second)
+		{
+		case is_func: return AST_result(reinterpret_cast<llvm::Function*>(name_map[name].first));
+		case is_none: if (parent_namespace) return parent_namespace->get_func(name);
+			else throw err("undefined function: " + name);
+		default: throw err("name \"" + name + "\" in this context is not function");
+		}
+	}
+	AST_result get_id(const std::string& name)
+	{
+		switch (name_map[name].second)
+		{
+		case is_type: return AST_result(reinterpret_cast<llvm::Type*>(name_map[name].first));
+		case is_alloc: return AST_result(reinterpret_cast<llvm::Value*>(name_map[name].first, true));
+		case is_func: return AST_result(reinterpret_cast<llvm::Function*>(name_map[name].first));
+		case is_none: if (parent_namespace) return parent_namespace->get_id(name);
+			else throw err("undefined identifier: " + name);
+		}
+	}
+};
+
+class AST_context: public AST_namespace
+{
 	llvm::BasicBlock* alloc_block = nullptr;
 	llvm::BasicBlock* entry_block = nullptr;
 	llvm::BasicBlock* src_block = nullptr;
 	llvm::BasicBlock* block = nullptr;
 	llvm::Function* function = nullptr;
 	std::set<llvm::BasicBlock*> need_ret;
-	std::map<std::string, llvm::Type*> types;
-	std::map<std::string, llvm::Value*> vars;
-	std::map<std::string, llvm::Function*> funcs;
+	//std::map<std::string, llvm::Type*> types;
+	//std::map<std::string, llvm::Value*> vars;
+	//std::map<std::string, llvm::Function*> funcs;
 public:
 	llvm::BasicBlock* loop_end = nullptr;
 	llvm::BasicBlock* loop_next = nullptr;
-	AST_context(AST_context* p, llvm::Function* F):
-		parent(p),
+	AST_context() {}
+	AST_context(AST_context* p, llvm::Function* F): AST_namespace(p),
 		alloc_block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "alloc", F)),
 		entry_block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "entry", F)),
 		block(entry_block),
@@ -263,8 +345,7 @@ public:
 		need_ret({block}),
 		function(p->function)
 	{}*/
-	AST_context(AST_context* p):
-		parent(p),
+	AST_context(AST_context* p): AST_namespace(p),
 		alloc_block(p->alloc_block),
 		entry_block(p->entry_block),
 		src_block(p->block),
@@ -274,11 +355,11 @@ public:
 		loop_next(p->loop_next),
 		function(p->function)
 	{}
-	AST_context() {}
 	~AST_context()
 	{
 		if (src_block)
 		{
+			auto parent = static_cast<AST_context*>(parent_namespace);
 			if (parent->need_ret.count(parent->block))
 			{
 				parent->need_ret.erase(parent->block);
@@ -287,10 +368,8 @@ public:
 			parent->block = block;
 		}
 	}
-	llvm::BasicBlock* new_block(const std::string& block_name)
-	{
-		return llvm::BasicBlock::Create(llvm::getGlobalContext(), block_name);
-	}
+	
+public:
 	void activate() { lBuilder.SetInsertPoint(block); }
 	void set_block(llvm::BasicBlock* b)
 	{
@@ -305,11 +384,11 @@ public:
 			if (function->getReturnType() == void_type) lBuilder.CreateRetVoid();
 			else throw err("function return without value");
 		}
-		else lBuilder.CreateRet(create_static_cast(ret, function->getReturnType()));		
+		else lBuilder.CreateRet(create_implicit_cast(ret, function->getReturnType()));		
 	}
 	void cond_jump_to(llvm::Value* cond, llvm::BasicBlock* b1, llvm::BasicBlock* b2)
 	{
-		lBuilder.CreateCondBr(create_static_cast(cond, bool_type), b1, b2);
+		lBuilder.CreateCondBr(create_implicit_cast(cond, bool_type), b1, b2);
 		if (need_ret.count(block))
 		{
 			need_ret.insert(b1); need_ret.insert(b2); need_ret.erase(block);
@@ -335,67 +414,33 @@ public:
 		llvm::verifyFunction(*function);
 		function->dump();
 	}
-	llvm::BasicBlock* get_block() { return block; }
-	llvm::Function* get_function() { return function; }
-	
-	AST_result get_type(const std::string& name)
-	{
-		if (types[name]) return AST_result(types[name]);
-		if (parent) return parent->get_type(name);
-		throw err("undefined type: " + name);
-	}
-	AST_result get_var(const std::string& name)
-	{
-		if (vars[name]) return AST_result(vars[name], true);
-		if (parent) return parent->get_var(name);
-		throw err("undefined variable: " + name);
-	}
-	AST_result get_func(const std::string& name)
-	{
-		if (funcs[name]) return AST_result(funcs[name]);
-		if (parent) return parent->get_func(name);
-		throw err("undefined function: " + name);
-	}
-	void check_conflict(const std::string& name)
-	{
-		if (types[name] || vars[name] || funcs[name]) throw err("name conflicted: " + name);
-	}
-	void add_type(const std::string& name, llvm::Type* type)
-	{
-		if (types[name]) throw err("redefined type: " + name);
-		check_conflict(name);
-		types[name] = type;
-	}
 	llvm::Value* alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init = nullptr)
 	{
-		if (vars[name]) throw err("redefined variable: " + name);
-		check_conflict(name);
 		llvm::Value* alloc;
-		if (init) init = create_static_cast(init, type);
+		if (init) init = create_implicit_cast(init, type);
 		if (alloc_block)
 		{
 			lBuilder.SetInsertPoint(alloc_block);
 			alloc = lBuilder.CreateAlloca(type);
 			activate();
 			if (init) lBuilder.CreateStore(init, alloc);
-			return vars[name] = alloc;
+			add_alloc(alloc, name);
+			return alloc;
 		}
-		else return vars[name] = new llvm::GlobalVariable(*lModule,
-			type, false, llvm::GlobalValue::ExternalLinkage, static_cast<llvm::Constant*>(init));
+		else
+		{
+			alloc = new llvm::GlobalVariable(*lModule, type, false, 
+				llvm::GlobalValue::ExternalLinkage, static_cast<llvm::Constant*>(init));
+			add_alloc(alloc, name);
+			return alloc;
+		}
 	}
-	void add_func(const std::string& name, llvm::Function* func)
+	llvm::BasicBlock* get_block() { return block; }
+	llvm::Function* get_function() { return function; }
+public:
+	static llvm::BasicBlock* new_block(const std::string& block_name)
 	{
-		if (funcs[name]) throw err("redefined function: " + name);
-		check_conflict(name);
-		funcs[name] = func;
-	}
-	AST_result get_id(const std::string& name)
-	{
-		if (types[name]) return AST_result(types[name]);
-		if (vars[name]) return AST_result(vars[name], true);
-		if (funcs[name]) return AST_result(funcs[name]);
-		if (parent) return parent->get_id(name);
-		throw err("undefined identifier: " + name);
+		return llvm::BasicBlock::Create(llvm::getGlobalContext(), block_name);
 	}
 };
 
