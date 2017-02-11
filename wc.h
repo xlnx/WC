@@ -683,8 +683,11 @@ parser::init_rules mparse_rules =
 	}},
 	{ "Type", {
 		{ "Type [ constexpr ]", [](gen_node& syntax_node, AST_context* context){
-			return AST_result(/*llvm::ArrayType::get(syntax_node[0].code_gen(context).get_type(),
-				syntax_node[1].code_gen(context).get_rvalue())*/);
+			auto type = syntax_node[0].code_gen(context).get_type();
+			auto size = static_cast<ConstantInt*>(create_static_cast(
+				syntax_node[1].code_gen(context).get_rvalue(), int_type));
+			if (size->isNegative()) throw err("negative array size");
+			return AST_result(llvm::ArrayType::get(type, size->getZExtValue()));
 		}}, 
 		{ "int", parser::forward },
 		{ "float", parser::forward },
@@ -747,7 +750,7 @@ parser::init_rules mparse_rules =
 			return AST_result();
 		}},
 		{ "return expr;", [](gen_node& syntax_node, AST_context* context){
-			context->leave_function(syntax_node[0].code_gen(context).get_rvalue());
+			context->leave_function(syntax_node[1].code_gen(context).get_rvalue());
 			return AST_result();
 		}},
 		{ "return;", parser::forward },
