@@ -97,49 +97,55 @@ static llvm::IRBuilder<> lBuilder(llvm::getGlobalContext());
 
 class AST_result
 {
-	union
-	{
-		llvm::Type* type;
-		llvm::Value* value;
-		llvm::Function* function;
-		void* custom_data;
-	};
+	//union { llvm::Type* type; llvm::Value* value; void* custom_data; };
+	void* value;
 public:
-	using result_type = enum { is_none = 0, is_type, is_lvalue, is_rvalue, is_function, is_custom };
+	using result_type = enum { is_none = 0, is_type, is_lvalue, is_rvalue, is_custom };
 	result_type flag;
 	AST_result(): value(nullptr), flag(is_none) {}
-	AST_result(llvm::Type* p): type(p), flag(is_type) {}
-	AST_result(llvm::Function* p): function(p), flag(is_function) {}
-	AST_result(llvm::Value* p, bool islvalue): value(p), flag(islvalue?is_lvalue:is_rvalue) {}
-	explicit AST_result(void* p): custom_data(p), flag(is_custom) {}
+	explicit AST_result(llvm::Type* p): value(p), flag(is_type) {}
+	//AST_result(llvm::Function* p): value(p), flag(is_rvalue) {}
+	AST_result(llvm::Value* p, bool islvalue): value(p), flag(islvalue ? is_lvalue : is_rvalue) {}
+	explicit AST_result(void* p): value(p), flag(is_custom) {}
 	llvm::Type* get_type() const
 	{
-		if (flag != is_type) throw err("invalid typename");
-		return type;
+		if (flag != is_type) throw err("invalid typename"); 
+		return reinterpret_cast<llvm::Type*>(value);
 	}
 	llvm::Value* get_rvalue() const
 	{
 		switch (flag)
 		{	// cast lvalue to rvalue
-		case is_lvalue: return lBuilder.CreateLoad(value);
-		case is_rvalue: return value;
+		case is_lvalue: return lBuilder.CreateLoad(reinterpret_cast<llvm::Value*>(value));
+		case is_rvalue: return reinterpret_cast<llvm::Value*>(value);
 		default: throw err("invalid value");
 		}
 	}
 	llvm::Value* get_lvalue() const
 	{
 		if (flag != is_lvalue) throw err("value cannot be assigned to");
-		return value;
+		return reinterpret_cast<llvm::Value*>(value);
 	}
 	llvm::Function* get_function() const
 	{
-		if (flag != is_function) throw err("invalid function");
-		return function;
+		if (flag != is_rvalue) throw err("invalid function");
+		auto func_ptr = reinterpret_cast<llvm::Value*>(value);
+		if (!func_ptr->getType()->isFunctionTy()) throw err("invalid function");
+		return static_cast<llvm::Function*>(func_ptr);
+	}
+	llvm::AllocaInst* get_array() const
+	{
+		if (flag != is_lvalue) throw err("invalid array");
+		auto array_ptr = static_cast<llvm::AllocaInst*>(reinterpret_cast<llvm::Value*>(value));
+		if (array_ptr->getAllocatedType()->isArrayTy()) return array_ptr;
+		throw err("invalid array");
+		//if (!array_ptr->getType()->isArrayTy()) throw err("invalid array");
+		//return array_ptr;
 	}
 	template <typename T> T* get_data() const
 	{
 		if (flag != is_custom) throw err("invalid custom data");
-		return reinterpret_cast<T*>(custom_data);
+		return reinterpret_cast<T*>(value);
 	}
 };
 
@@ -299,7 +305,7 @@ public:
 	{
 		switch (name_map[name].second)
 		{
-		case is_func: return AST_result(reinterpret_cast<llvm::Function*>(name_map[name].first));
+		case is_func: return AST_result(reinterpret_cast<llvm::Function*>(name_map[name].first), false);
 		case is_none: if (parent_namespace) return parent_namespace->get_func(name);
 			else throw err("undefined function: " + name);
 		default: throw err("name \"" + name + "\" in this context is not function");
@@ -310,8 +316,8 @@ public:
 		switch (name_map[name].second)
 		{
 		case is_type: return AST_result(reinterpret_cast<llvm::Type*>(name_map[name].first));
-		case is_alloc: return AST_result(reinterpret_cast<llvm::Value*>(name_map[name].first, true));
-		case is_func: return AST_result(reinterpret_cast<llvm::Function*>(name_map[name].first));
+		case is_alloc: return AST_result(reinterpret_cast<llvm::Value*>(name_map[name].first), true);
+		case is_func: return AST_result(reinterpret_cast<llvm::Function*>(name_map[name].first), false);
 		case is_none: if (parent_namespace) return parent_namespace->get_id(name);
 			else throw err("undefined identifier: " + name);
 		}

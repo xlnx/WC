@@ -577,8 +577,13 @@ parser::expr_init_rules mexpr_rules =
 	},
 	
 	{
-		{ "%[%pk]", left_asl, parser::forward },
-		{ "%(%pk)", left_asl, [](gen_node& syntax_node, AST_context* context){	
+		{ "% [ Expr ]", left_asl, [](gen_node& syntax_node, AST_context* context){
+			auto array = syntax_node[0].code_gen(context).get_array();
+			auto index = create_implicit_cast(syntax_node[1].code_gen(context).get_rvalue(), int_type);
+			vector<Value*> idx = { ConstantInt::get(int_type, 0), index };
+			return AST_result(GetElementPtrInst::Create(array, idx, "", context->get_block()), true);
+		}},
+		{ "% ( %pk )", left_asl, [](gen_node& syntax_node, AST_context* context){	
 			auto function = syntax_node[0].code_gen(context).get_function();
 			auto params = syntax_node[1].code_gen(context).get_data<std::vector<Value*>>();
 			auto function_proto = function->getFunctionType();
@@ -609,6 +614,20 @@ parser::init_rules mparse_rules =
 		{ "TypeDefine", parser::forward },
 		{ "StructDefine", parser::forward },
 		{ "GlobalVarDefine", parser::forward }
+	}},
+	{ "Expr", {
+		{ "Expr, expr", [](gen_node& syntax_node, AST_context* context){
+			syntax_node[0].code_gen(context);
+			return syntax_node[1].code_gen(context);
+		}},
+		{ "expr", parser::forward }
+	}},
+	{ "ConstExpr", {
+		{ "ConstExpr, constexpr", [](gen_node& syntax_node, AST_context* context){
+			syntax_node[0].code_gen(context);
+			return syntax_node[1].code_gen(context);
+		}},
+		{ "constexpr", parser::forward }
 	}},
 	{ "FunctionParams", {
 		{ "FunctionParamList", [](gen_node& syntax_node, AST_context* context){
@@ -716,7 +735,7 @@ parser::init_rules mparse_rules =
 		{ "TypeExpr0", parser::forward }
 	}},
 	{ "TypeExpr0", {
-		{ "TypeExpr0 [ constexpr ]", [](gen_node& syntax_node, AST_context* context){
+		{ "TypeExpr0 [ ConstExpr ]", [](gen_node& syntax_node, AST_context* context){
 			if (context->current_type == void_type)
 				throw err("cannot create array of void type");
 			if (context->current_type->isFunctionTy())
@@ -791,11 +810,11 @@ parser::init_rules mparse_rules =
 		}},
 	}},
 	{ "InitExpr", {
-		{ "= expr", parser::forward },
+		{ "= Expr", parser::forward },
 		{ "", parser::empty }
 	}},
 	{ "GlobalInitExpr", {
-		{ "= constexpr", parser::forward },
+		{ "= ConstExpr", parser::forward },
 		{ "", parser::empty }
 	}},
 	{ "Type", {
@@ -809,7 +828,7 @@ parser::init_rules mparse_rules =
 		}}
 	}},
 	{ "Stmt", {
-		{ "while ( expr ) Stmt", [](gen_node& syntax_node, AST_context* context){
+		{ "while ( Expr ) Stmt", [](gen_node& syntax_node, AST_context* context){
 			auto loop_end = context->loop_end;
 			auto loop_next = context->loop_next;
 			auto cond_block = context->loop_next = AST_context::new_block("while_cond");
@@ -828,7 +847,7 @@ parser::init_rules mparse_rules =
 			context->loop_next = loop_next;
 			return AST_result();
 		}},
-		{ "if ( expr ) Stmt else Stmt", [](gen_node& syntax_node, AST_context* context){	
+		{ "if ( Expr ) Stmt else Stmt", [](gen_node& syntax_node, AST_context* context){	
 			auto then_block = AST_context::new_block("then");
 			auto else_block = AST_context::new_block("else");
 			auto merge_block = AST_context::new_block("endif");
@@ -845,7 +864,7 @@ parser::init_rules mparse_rules =
 			context->set_block(merge_block);
 			return AST_result();
 		}},
-		{ "if ( expr ) Stmt", [](gen_node& syntax_node, AST_context* context){	
+		{ "if ( Expr ) Stmt", [](gen_node& syntax_node, AST_context* context){	
 			auto then_block = AST_context::new_block("then");
 			auto merge_block = AST_context::new_block("endif");
 			context->cond_jump_to(syntax_node[0].code_gen(context).get_rvalue(), then_block, merge_block);
@@ -865,13 +884,13 @@ parser::init_rules mparse_rules =
 			return AST_result();
 		}},
 		{ "TypeDefine", parser::forward },
-		{ "expr;", parser::forward },
+		{ "Expr;", parser::forward },
 		{ "{ Block }", [](gen_node& syntax_node, AST_context* context){
 			AST_context new_context(context);
 			syntax_node[0].code_gen(&new_context);
 			return AST_result();
 		}},
-		{ "return expr;", [](gen_node& syntax_node, AST_context* context){
+		{ "return Expr;", [](gen_node& syntax_node, AST_context* context){
 			context->leave_function(syntax_node[1].code_gen(context).get_rvalue());
 			return AST_result();
 		}},
@@ -885,7 +904,7 @@ parser::init_rules mparse_rules =
 		{ "", parser::empty }
 	}},
 	{ "exprelem", {
-		{ "( expr )", parser::forward },
+		{ "( Expr )", parser::forward },
 		{ "Id", parser::forward },
 		{ "Dec", parser::forward },
 		{ "Hex", parser::forward },
@@ -896,7 +915,7 @@ parser::init_rules mparse_rules =
 		{ "false", parser::forward },
 	}},
 	{ "constexprelem", {
-		{ "( expr )", parser::forward },
+		{ "( ConstExpr )", parser::forward },
 		//{ "Id", parser::forward },
 		{ "Dec", parser::forward },
 		{ "Hex", parser::forward },

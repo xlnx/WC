@@ -20,17 +20,17 @@ parser::parser(lexer::init_rules& lR, init_rules& iR, expr_init_rules& eiR, std:
 	}
 	for (auto& r: iR)
 	{
-		if (!signs.count(r.first))
-		{	// no such element
+		//if (!signs.count(r.first))
+		//{	// no such element
 			m_lR.push_back(
 			{ r.first, r.first, {word, no_attr} });
 			signs.insert(r.first);
 			gens.insert(r.first);
-		}
-		else
-		{
-			throw err("Generate rule redeclared: " + r.first);
-		}
+		//}
+		//else
+		//{
+			//throw err("Generate rule redeclared: " + r.first);
+		//}
 	}
 	signs.insert(stack_bottom);	// stack empty
 	//signs.insert(empty_sign);
