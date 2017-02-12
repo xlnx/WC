@@ -20,17 +20,17 @@ parser::parser(lexer::init_rules& lR, init_rules& iR, expr_init_rules& eiR, std:
 	}
 	for (auto& r: iR)
 	{
-		//if (!signs.count(r.first))
-		//{	// no such element
+		if (!signs.count(r.first))
+		{	// no such element
 			m_lR.push_back(
 			{ r.first, r.first, {word, no_attr} });
 			signs.insert(r.first);
 			gens.insert(r.first);
-		//}
-		//else
-		//{
-			//throw err("Generate rule redeclared: " + r.first);
-		//}
+		}
+		else
+		{
+			throw err("Generate rule redeclared: " + r.first);
+		}
 	}
 	signs.insert(stack_bottom);	// stack empty
 	//signs.insert(empty_sign);
@@ -248,7 +248,7 @@ parser::parser(lexer::init_rules& lR, init_rules& iR, expr_init_rules& eiR, std:
 					if (!NEW.empty())
 					{
 						bool is_sub;
-						int j = 0, r_id = -1;
+						int j = 0, r_id = 0x7FFFFFFF;
 						for (; j < closures.size(); ++j)
 						{	// TODO: is this right?
 							is_sub = true;
@@ -334,7 +334,8 @@ lexer::init_rules parser::expr_gen(lexer::init_rules& lR, init_rules& iR, expr_i
 	};
 	lexer_base lex(
 	{	// type
-		{ "pack", "%pk", {no_attr} },
+		{ "pack", "%\\$", {no_attr} },
+		{ "pattern", "%\\w+", {} },
 		//{ "ref", "%(?:0|[1-9]\\d*)", {} }
 		{ "param", "%", {no_attr} },
 		{ "piece", "(?:\\\\%|[^\\s%]*)+", {} },
@@ -362,7 +363,9 @@ lexer::init_rules parser::expr_gen(lexer::init_rules& lR, init_rules& iR, expr_i
 				for (int i = 0; i < sz; ++i)
 				{
 					if (arr[i].name == "param")
+					{
 						str += i == sub_pos ? r_next : r_this + " ";
+					}
 					else if (arr[i].name == "piece")
 					{
 						std::string& s = arr[i].attr->value;
@@ -377,7 +380,13 @@ lexer::init_rules parser::expr_gen(lexer::init_rules& lR, init_rules& iR, expr_i
 						str += s + " ";
 					}
 					else if (arr[i].name == "pack")
+					{
 						str += tag + "pk ";
+					}
+					else if (arr[i].name == "pattern")
+					{
+						str += std::string(arr[i].attr->value.c_str() + 1) + " ";
+					}
 				}
 				iR.back().second.push_back({ str, v.func });
 				//alert("", str);

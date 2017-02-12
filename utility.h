@@ -430,10 +430,10 @@ public:
 	}
 	llvm::Value* alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init = nullptr)
 	{
-		llvm::Value* alloc;
 		if (type == void_type) throw err("cannot create variable of void type");
 		if (name == "") throw err("cannot alloc a dummy variable");
 		if (init) init = create_implicit_cast(init, type);
+		llvm::Value* alloc;
 		if (alloc_block)
 		{
 			lBuilder.SetInsertPoint(alloc_block);
