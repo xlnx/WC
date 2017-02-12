@@ -248,7 +248,7 @@ parser::parser(lexer::init_rules& lR, init_rules& iR, expr_init_rules& eiR, std:
 					if (!NEW.empty())
 					{
 						bool is_sub;
-						int j = 0;
+						int j = 0, r_id = -1;
 						for (; j < closures.size(); ++j)
 						{	// TODO: is this right?
 							is_sub = true;
@@ -259,6 +259,7 @@ parser::parser(lexer::init_rules& lR, init_rules& iR, expr_init_rules& eiR, std:
 									is_sub = false;
 									break;
 								}
+								r_id = std::min(T.first, r_id);
 							}
 							if (is_sub) break;
 						}
@@ -272,11 +273,13 @@ parser::parser(lexer::init_rules& lR, init_rules& iR, expr_init_rules& eiR, std:
 							GOTO[i][sgn] = closures.size();
 							//std::cout << sgn << std::endl;
 							GEN(NEW); // generate this closure
-							if (ACTION[i][sgn])
-							{//alert();
-								throw parser_err("Not SLR at " + sgn);
+							switch (ACTION[i][sgn])			// ambigious
+							{
+							case a_move_in: throw parser_err("Not SLR at " + sgn);
+							default: if (r_id < ACTION[i][sgn]) ACTION[i][sgn] = a_move_in; break;
+							case a_error: ACTION[i][sgn] = a_move_in; break;
+							case a_accept: throw parser_err("Not SLR at " + sgn);
 							}
-							ACTION[i][sgn] = a_move_in;
 						}
 					}
 				}

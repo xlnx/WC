@@ -76,6 +76,7 @@ token lexer_base::next_token()
 				else return token(p.token_name, LN, COL, ln_lookup[LN]);
 			}
 		}
+		std::cerr << cur_ptr << std::endl;
 		cur_ptr = nullptr;
 		// input not valid
 		throw lex_err(ln, col, ln_lookup[ln]);
@@ -142,6 +143,7 @@ token lexer::next_token()
 				else return token(p.token_name, LN, COL, ln_lookup[LN]);
 			}
 		}
+		std::cerr << cur_ptr << std::endl;
 		cur_ptr = nullptr;
 		// input not valid
 		throw lex_err(ln, col, ln_lookup[ln]);

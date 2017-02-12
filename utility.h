@@ -153,6 +153,7 @@ using type_name_lookup = std::map<llvm::Type*, std::string>;
 using type_item = type_name_lookup::value_type;
 type_name_lookup type_names = 
 {
+	type_item(void_type, "void"),
 	type_item(int_type, "int"),
 	type_item(float_type, "float"),
 	type_item(char_type, "char"),
@@ -245,6 +246,7 @@ public:
 	}*/
 	void add_type(llvm::Type* type, const std::string& name)
 	{
+		if (name == "") throw err("cannot define a dummy type");
 		switch (name_map[name].second)
 		{
 		case is_type: throw err("redefined type: " + name);
@@ -254,6 +256,7 @@ public:
 	}
 	void add_alloc(llvm::Value* alloc, const std::string& name)
 	{
+		if (name == "") throw err("cannot define a dummy variable");
 		switch (name_map[name].second)
 		{
 		case is_alloc: throw err("redefined variable: " + name);
@@ -263,6 +266,7 @@ public:
 	}
 	void add_func(llvm::Function* func, const std::string& name)
 	{
+		if (name == "") throw err("cannot define a dummy function");
 		switch (name_map[name].second)
 		{
 		case is_func: throw err("redefined function: " + name);
@@ -328,6 +332,10 @@ class AST_context: public AST_namespace
 public:
 	llvm::BasicBlock* loop_end = nullptr;
 	llvm::BasicBlock* loop_next = nullptr;
+	llvm::Type* current_type = nullptr;
+	std::string current_name;
+	std::vector<std::string> function_param_name;
+	bool collect_param_name = false;
 	AST_context() {}
 	AST_context(AST_context* p, llvm::Function* F): AST_namespace(p),
 		alloc_block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "alloc", F)),
@@ -417,6 +425,8 @@ public:
 	llvm::Value* alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init = nullptr)
 	{
 		llvm::Value* alloc;
+		if (type == void_type) throw err("cannot create variable of void type");
+		if (name == "") throw err("cannot alloc a dummy variable");
 		if (init) init = create_implicit_cast(init, type);
 		if (alloc_block)
 		{
