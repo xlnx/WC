@@ -32,8 +32,8 @@ class parser
 	static const action a_error;	// S -> aB.X
 	
 	static const sign stack_bottom;
-	static const sign empty_sign;
 public:
+	static const sign empty_sign;
 	using handler = std::function<AST_result(gen_node&, AST_context*)>;
 	struct rule
 	{

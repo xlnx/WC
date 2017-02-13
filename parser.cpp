@@ -33,14 +33,14 @@ parser::parser(lexer::init_rules& lR, init_rules& iR, expr_init_rules& eiR, std:
 		}
 	}
 	signs.insert(stack_bottom);	// stack empty
-	//signs.insert(empty_sign);
+	signs.insert(empty_sign);
 	lexer_base m_lexer(m_lR);
 	std::map<sign, std::set<rule_id>> rules_map;
 	for (auto& p: iR)
 	{
 		for (auto& g: p.second)
 		{
-			rule r = { p.first, {}, 0, g.second};	// if second == {} then it is empty
+			rule r = { p.first, {}, 0, g.second };	// if second == {} then it is empty
 			m_lexer.input(g.first.c_str());
 			token T;
 			while (T = m_lexer.next_token())
@@ -56,47 +56,50 @@ parser::parser(lexer::init_rules& lR, init_rules& iR, expr_init_rules& eiR, std:
 			rules.push_back(r);
 		}
 	}
+	
+	// Generate FIRST<> && FOLLOW<>
 	std::map<sign, std::set<sign>> FIRST, FOLLOW;
-	std::set<sign> been, settled;
-	std::function<void(const sign&)> gen_first = [&](const sign& s)->void
-	{
-		bool B = been.count(s), S = settled.count(s);
-		if (!B || S)
-		{	// it is a gen
-			been.insert(s);
-			for (auto r_id: rules_map[s])
-			{	// for all the gen rules
-				for (auto& t: rules[r_id].signs)
+	bool add_sub = false;
+	do {
+		add_sub = false;
+		for (auto& sgn: signs)
+		{
+			if (!rules_map[sgn].empty())	// is gen
+			{	//gen_first(sgn);
+				for (auto r_id: rules_map[sgn])
 				{
-					if (s == t) break;
-					if (!rules_map[t].empty())
+					bool has_empty;
+					for (auto& t: rules[r_id].signs)
 					{
-						if (!S) gen_first(t);
-						for (auto& g: FIRST[t]) // settle that gen
+						has_empty = false;
+						for (auto& g: FIRST[t])
 						{
-							FIRST[s].insert(g);
-						}	// TODO: repair this
-						if (!FIRST[t].count(empty_sign)) break;
-						break;
+							if (g == empty_sign)
+							{
+								has_empty = true;
+							}
+							else if (!FIRST[sgn].count(g))
+							{
+								FIRST[sgn].insert(g);
+								add_sub = true;
+							}
+						}
+						if (!has_empty) break;
 					}
-					else
-					{	// term sign
-						FIRST[s].insert(t);
-						break;
+					if (has_empty && !FIRST[sgn].count(empty_sign))
+					{
+						FIRST[sgn].insert(empty_sign);
+						add_sub = true;
 					}
 				}
 			}
-			settled.insert(s);
+			else if (!FIRST[sgn].count(sgn))
+			{
+				FIRST[sgn] = { sgn };
+				add_sub = true;
+			}
 		}
-	};
-	for (auto& sgn: signs)
-	{
-		if (!rules_map[sgn].empty())
-		{
-			gen_first(sgn);
-		}
-	}
-	bool add_sub = false;
+	} while (add_sub);
 	do {
 		add_sub = false;
 		for (auto& r: rules)
@@ -158,6 +161,8 @@ parser::parser(lexer::init_rules& lR, init_rules& iR, expr_init_rules& eiR, std:
 		}
 	}
 	FOLLOW[s + "__"].insert(stack_bottom);
+
+
 	std::vector<closure> closures;	// S__ -> S
 	auto GEN = [&](closure I)
 	{

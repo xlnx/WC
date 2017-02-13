@@ -750,11 +750,11 @@ parser::init_rules mparse_rules =
 			context->current_name = static_cast<term_node&>(syntax_node[0]).data.attr->value;
 			return AST_result();
 		}},
+		{ "( TypeExpr )", parser::forward },
 		{ "", [](gen_node& syntax_node, AST_context* context){
 			context->current_name = "";
 			return AST_result();
-		}},		// dummy
-		{ "( TypeExpr )", parser::forward }
+		}}		// dummy
 	}},
 	{ "Type", {
 		{ "void", parser::forward },
