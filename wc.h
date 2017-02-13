@@ -71,14 +71,26 @@ lexer::init_rules mlex_rules =
 		{ "Float", [](term_node& T, AST_context*){
 			double val;
 			if (sscanf(T.data.attr->value.c_str(), "%lf", &val) == 1)
-				return AST_result(ConstantFP::get(lBuilder.getDoubleTy(), val), false);
+				return AST_result(ConstantFP::get(float_type, val), false);
 			throw err("invalid float literal: ", T.data);
 		}},
 		{ "Scientific", [](term_node& T, AST_context*){
 			double val;
 			if (sscanf(T.data.attr->value.c_str(), "%lf", &val) == 1)
-				return AST_result(ConstantFP::get(lBuilder.getDoubleTy(), val), false);
+				return AST_result(ConstantFP::get(float_type, val), false);
 			throw err("invalid float literal: ", T.data);
+		}},
+		{ "Char", [](term_node& T, AST_context*){
+			auto src = T.data.attr->value.c_str() + 1;
+			if (*src != '\\') return AST_result(lBuilder.getInt8(*src), false);
+			int src_char;
+			if (*++src == 'x' || *src == 'X')
+			{
+				++src; if (sscanf(src, "%x", &src_char) != 1) throw err("invalid char literal");
+				return AST_result(lBuilder.getInt8(src_char), false);
+			}
+			if (sscanf(src, "%o", &src_char) != 1) throw err("invalid char literal");
+			return AST_result(lBuilder.getInt8(src_char), false);
 		}},
 		{ "Id", [](term_node& T, AST_context* context){
 			return context->get_id(T.data.attr->value);
@@ -548,11 +560,18 @@ parser::expr_init_rules mexpr_rules =
 	},
 	
 	{
-		{ "*%", right_asl, [](gen_node& syntax_node, AST_context* context){
-			return AST_result();
+		{ "*%", right_asl, [](gen_node& syntax_node, AST_context* context)->AST_result{
+			auto data = syntax_node[0].code_gen(context).get_among<PointerType, ArrayType>();
+			switch (data.second)
+			{
+			case 0: return AST_result(data.first, true);
+			case 1: vector<Value*> idx = { ConstantInt::get(int_type, 0), ConstantInt::get(int_type, 0) };
+				return AST_result(GetElementPtrInst::Create(data.first, idx, "", context->get_block()), true);
+			}
 		}},
 		{ "&%", right_asl, [](gen_node& syntax_node, AST_context* context){
-			return AST_result();
+			auto RHS = syntax_node[0].code_gen(context).get_lvalue();
+			return AST_result(RHS, false);
 		}},
 		{ "-%", right_asl, [](gen_node& syntax_node, AST_context* context){
 			auto RHS = syntax_node[0].code_gen(context).get_rvalue();
@@ -578,10 +597,10 @@ parser::expr_init_rules mexpr_rules =
 	
 	{
 		{ "% [ %Expr ]", left_asl, [](gen_node& syntax_node, AST_context* context){
-			auto array = syntax_node[0].code_gen(context).get_array();
+			auto data = syntax_node[0].code_gen(context).get_among<PointerType, ArrayType>();
 			auto index = create_implicit_cast(syntax_node[1].code_gen(context).get_rvalue(), int_type);
 			vector<Value*> idx = { ConstantInt::get(int_type, 0), index };
-			return AST_result(GetElementPtrInst::Create(array, idx, "", context->get_block()), true);
+			return AST_result(GetElementPtrInst::Create(data.first, idx, "", context->get_block()), true);
 		}},
 		{ "% ( %$ )", left_asl, [](gen_node& syntax_node, AST_context* context){	
 			auto function = syntax_node[0].code_gen(context).get_function();
@@ -740,10 +759,19 @@ parser::init_rules mparse_rules =
 				syntax_node[1].code_gen(context).get_rvalue(), int_type));
 			if (size->isNegative()) throw err("negative array size");
 			auto& base_type_name = type_names[context->current_type];
-			context->current_type = llvm::ArrayType::get(context->current_type, size->getZExtValue());
-			type_names[context->current_type] = base_type_name + "[" + [](int x)->string{
+			//auto elem_type = context->current_type;
+			context->current_type = ArrayType::get(context->current_type, size->getZExtValue());
+			// record typename
+			type_names[context->current_type] = base_type_name + "[" + [](int x)->string
+			{
 				char s[20];	sprintf(s, "%d", x); return s;
 			}(size->getZExtValue()) + "]";
+			// create implicit cast to pointer
+/*			auto pointer_type = PointerType::getUnqual(elem_type);
+			implicit_casts[{ context->current_type, pointer_type }] = [](Value* v)->Value*
+			{
+				//return GetElementPtrInst::Create(array, idx, "", context->get_block()), true);
+			};*/
 			return syntax_node[0].code_gen(context);
 		}},
 		{ "Id", [](gen_node& syntax_node, AST_context* context){
@@ -834,7 +862,11 @@ parser::init_rules mparse_rules =
 	
 	// Defination
 	{ "TypeDefine", {
-		{ "TypeDefine, TypeExpr", [](gen_node& syntax_node, AST_context* context){
+		{ "CStyleTypeDefine", parser::forward },
+		{ "CppStyleTypeDefine", parser::forward }
+	}},
+	{ "CStyleTypeDefine", {
+		{ "CStyleTypeDefine, TypeExpr", [](gen_node& syntax_node, AST_context* context){
 			auto base_type = context->current_type = syntax_node[0].code_gen(context).get_type();
 			syntax_node[1].code_gen(context);
 			context->add_type(context->current_type, context->current_name);
@@ -845,6 +877,15 @@ parser::init_rules mparse_rules =
 			syntax_node[1].code_gen(context);
 			context->add_type(context->current_type, context->current_name);
 			return AST_result(base_type);
+		}}
+	}},
+	{ "CppStyleTypeDefine", {
+		{ "typedef Id = Type TypeExpr", [](gen_node& syntax_node, AST_context* context){
+			auto base_type = context->current_type = syntax_node[1].code_gen(context).get_type();
+			syntax_node[2].code_gen(context);
+			if (context->current_name != "") throw err("type expression not dummy");
+			context->add_type(context->current_type, static_cast<term_node&>(syntax_node[0]).data.attr->value);
+			return AST_result();
 		}}
 	}},
 	{ "GlobalVarDefine", {
@@ -937,6 +978,7 @@ parser::init_rules mparse_rules =
 		{ "Oct", parser::forward },
 		{ "Float", parser::forward },
 		{ "Scientific", parser::forward },
+		{ "Char", parser::forward },
 		{ "true", parser::forward },
 		{ "false", parser::forward },
 	}},
@@ -948,6 +990,7 @@ parser::init_rules mparse_rules =
 		{ "Oct", parser::forward },
 		{ "Float", parser::forward },
 		{ "Scientific", parser::forward },
+		{ "Char", parser::forward },
 		{ "true", parser::forward },
 		{ "false", parser::forward },
 	}},

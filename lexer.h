@@ -9,6 +9,7 @@
 namespace lr_parser
 {
 	// word : this token must be whole word
+	// custom_catch : dont catch this token and user must implement a custom catch
 	// no_attr : this token needs no attr so the lexer dont need to record default attrs.
 using reg_option = enum { word, no_attr, ignore_case };
 

@@ -26,8 +26,8 @@ private:
 	using pointer = std::shared_ptr<attr_type>;
 public:
 	token() = default;
-	token(const std::string& n, unsigned _ln, unsigned _col, pchar _ptr, const pointer& p = nullptr):
-		name(n), ln(_ln), col(_col), ptr(_ptr), attr(p) {}
+	token(const std::string& n, unsigned _ln, unsigned _col, pchar _ptr,
+		const pointer& p = nullptr): name(n), ln(_ln), col(_col), ptr(_ptr), attr(p) {}
 	explicit operator bool() const { return name != ""; }
 public:
 	std::string name;
@@ -64,7 +64,7 @@ private:
 AST* cur_node = nullptr;
 
 struct err:std::logic_error
-{	
+{
 	err(const std::string& s, AST& T): std::logic_error(s), ln(T.ln), col(T.col), ptr(T.ptr)
 	{}
 	err(const std::string& s, token& T): std::logic_error(s), ln(T.ln), col(T.col), ptr(T.ptr)
@@ -97,7 +97,6 @@ static llvm::IRBuilder<> lBuilder(llvm::getGlobalContext());
 
 class AST_result
 {
-	//union { llvm::Type* type; llvm::Value* value; void* custom_data; };
 	void* value;
 public:
 	using result_type = enum { is_none = 0, is_type, is_lvalue, is_rvalue, is_custom };
@@ -107,47 +106,70 @@ public:
 	//AST_result(llvm::Function* p): value(p), flag(is_rvalue) {}
 	AST_result(llvm::Value* p, bool islvalue): value(p), flag(islvalue ? is_lvalue : is_rvalue) {}
 	explicit AST_result(void* p): value(p), flag(is_custom) {}
-	llvm::Type* get_type() const
+	llvm::Type* get_type() const;
+	llvm::Value* get_rvalue() const;
+	llvm::Value* get_lvalue() const;
+	llvm::Function* get_function() const;
+	llvm::AllocaInst* get_array() const;
+	template <typename T>
+		T* get_data() const
+		{
+			if (flag != is_custom) throw err("invalid custom data");
+			return reinterpret_cast<T*>(value);
+		}
+	template <typename...U> 
+		std::pair<llvm::Value*, unsigned> get_among() const
+		{
+			return get_hp<0, U...>();
+		}
+private:
+	template <typename T>
+		llvm::Value* get() const
+		{
+			throw err("cannot get value of this type");
+		}
+	template <unsigned index, typename T, typename...U>
+		std::pair<llvm::Value*, unsigned> get_hp() const
+		{
+			if (auto v = get<T>()) return { v, index };
+			return get_hp<index + 1, U...>();
+		}
+	template <unsigned index>
+		std::pair<llvm::Value*, unsigned> get_hp() const
+		{
+			throw err("invalid get-value request");
+		}
+};
+
+// GetType Spec
+template <>
+	llvm::Value* AST_result::get<llvm::PointerType>() const
 	{
-		if (flag != is_type) throw err("invalid typename"); 
-		return reinterpret_cast<llvm::Type*>(value);
-	}
-	llvm::Value* get_rvalue() const
-	{
+		auto ptr = reinterpret_cast<llvm::Value*>(value);
 		switch (flag)
 		{	// cast lvalue to rvalue
-		case is_lvalue: return lBuilder.CreateLoad(reinterpret_cast<llvm::Value*>(value));
-		case is_rvalue: return reinterpret_cast<llvm::Value*>(value);
-		default: throw err("invalid value");
+		case is_lvalue: if (static_cast<llvm::AllocaInst*>(ptr)->getAllocatedType()->isPointerTy())
+			return lBuilder.CreateLoad(ptr); break;
+		case is_rvalue: if (ptr->getType()->isPointerTy()) return ptr; break;
 		}
+		return nullptr;
 	}
-	llvm::Value* get_lvalue() const
+template <>
+	llvm::Value* AST_result::get<llvm::ArrayType>() const
 	{
-		if (flag != is_lvalue) throw err("value cannot be assigned to");
-		return reinterpret_cast<llvm::Value*>(value);
+		auto ptr = reinterpret_cast<llvm::Value*>(value);
+		if (flag == is_lvalue && static_cast<llvm::AllocaInst*>(ptr)->getAllocatedType()->isArrayTy()) 
+			return ptr;
+		return nullptr;
 	}
-	llvm::Function* get_function() const
+template <>
+	llvm::Value* AST_result::get<llvm::FunctionType>() const
 	{
-		if (flag != is_rvalue) throw err("invalid function");
-		auto func_ptr = reinterpret_cast<llvm::Value*>(value);
-		if (!func_ptr->getType()->isFunctionTy()) throw err("invalid function");
-		return static_cast<llvm::Function*>(func_ptr);
+		auto ptr = reinterpret_cast<llvm::Value*>(value);
+		if (flag == is_rvalue && ptr->getType()->isFunctionTy()) 
+			return ptr;
+		return nullptr;
 	}
-	llvm::AllocaInst* get_array() const
-	{
-		if (flag != is_lvalue) throw err("invalid array");
-		auto array_ptr = static_cast<llvm::AllocaInst*>(reinterpret_cast<llvm::Value*>(value));
-		if (array_ptr->getAllocatedType()->isArrayTy()) return array_ptr;
-		throw err("invalid array");
-		//if (!array_ptr->getType()->isArrayTy()) throw err("invalid array");
-		//return array_ptr;
-	}
-	template <typename T> T* get_data() const
-	{
-		if (flag != is_custom) throw err("invalid custom data");
-		return reinterpret_cast<T*>(value);
-	}
-};
 
 auto void_type = lBuilder.getVoidTy();
 auto int_type = lBuilder.getInt32Ty();
@@ -246,82 +268,19 @@ protected:
 public:
 	AST_namespace() {}
 	AST_namespace(AST_namespace* p): parent_namespace(p) {}
+	virtual ~AST_namespace() = default;
 	/*void check_conflict(const std::string& name)
 	{
 		if (name_map[name].second) throw err("name conflicted: " + name);
 	}*/
-	void add_type(llvm::Type* type, const std::string& name)
-	{
-		if (name == "") throw err("cannot define a dummy type");
-		switch (name_map[name].second)
-		{
-		case is_type: throw err("redefined type: " + name);
-		default: throw err("name conflicted: " + name);
-		case is_none: name_map[name] = { type, is_type }; 
-		}
-	}
-	void add_alloc(llvm::Value* alloc, const std::string& name)
-	{
-		if (name == "") throw err("cannot define a dummy variable");
-		switch (name_map[name].second)
-		{
-		case is_alloc: throw err("redefined variable: " + name);
-		default: throw err("name conflicted: " + name);
-		case is_none: name_map[name] = { alloc, is_alloc }; 
-		}
-	}
-	void add_func(llvm::Function* func, const std::string& name)
-	{
-		if (name == "") throw err("cannot define a dummy function");
-		switch (name_map[name].second)
-		{
-		case is_func: throw err("redefined function: " + name);
-		default: throw err("name conflicted: " + name);
-		case is_none: name_map[name] = { func, is_func }; 
-		}
-	}
+	void add_type(llvm::Type* type, const std::string& name);
+	void add_alloc(llvm::Value* alloc, const std::string& name);
+	void add_func(llvm::Function* func, const std::string& name);
 	// get type
-	AST_result get_type(const std::string& name)
-	{
-		switch (name_map[name].second)
-		{
-		case is_type: return AST_result(reinterpret_cast<llvm::Type*>(name_map[name].first));
-		case is_none: if (parent_namespace) return parent_namespace->get_type(name);
-			else throw err("undefined type: " + name);
-		default: throw err("name \"" + name + "\" in this context is not typename");
-		}
-	}
-	AST_result get_var(const std::string& name)
-	{
-		switch (name_map[name].second)
-		{
-		case is_alloc: return AST_result(reinterpret_cast<llvm::Value*>(name_map[name].first), true);
-		case is_none: if (parent_namespace) return parent_namespace->get_var(name);
-			else throw err("undefined variable: " + name);
-		default: throw err("name \"" + name + "\" in this context is not variable");
-		}
-	}
-	AST_result get_func(const std::string& name)
-	{
-		switch (name_map[name].second)
-		{
-		case is_func: return AST_result(reinterpret_cast<llvm::Function*>(name_map[name].first), false);
-		case is_none: if (parent_namespace) return parent_namespace->get_func(name);
-			else throw err("undefined function: " + name);
-		default: throw err("name \"" + name + "\" in this context is not function");
-		}
-	}
-	AST_result get_id(const std::string& name)
-	{
-		switch (name_map[name].second)
-		{
-		case is_type: return AST_result(reinterpret_cast<llvm::Type*>(name_map[name].first));
-		case is_alloc: return AST_result(reinterpret_cast<llvm::Value*>(name_map[name].first), true);
-		case is_func: return AST_result(reinterpret_cast<llvm::Function*>(name_map[name].first), false);
-		case is_none: if (parent_namespace) return parent_namespace->get_id(name);
-			else throw err("undefined identifier: " + name);
-		}
-	}
+	AST_result get_type(const std::string& name);
+	AST_result get_var(const std::string& name);
+	AST_result get_func(const std::string& name);
+	AST_result get_id(const std::string& name);
 };
 
 class AST_context: public AST_namespace
@@ -342,6 +301,7 @@ public:
 	std::string current_name;
 	std::vector<std::string> function_param_name;
 	bool collect_param_name = false;
+public:
 	AST_context() {}
 	AST_context(AST_context* p, llvm::Function* F): AST_namespace(p),
 		alloc_block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "alloc", F)),
@@ -350,15 +310,6 @@ public:
 		need_ret({entry_block}),
 		function(F)
 	{ lBuilder.SetInsertPoint(block); }
-	/*AST_context(AST_context* p, const std::string& block_name):
-		parent(p),
-		alloc_block(p->alloc_block),
-		entry_block(p->entry_block),
-		src_block(nullptr),
-		block(llvm::BasicBlock::Create(llvm::getGlobalContext(), block_name, p->function)),
-		need_ret({block}),
-		function(p->function)
-	{}*/
 	AST_context(AST_context* p): AST_namespace(p),
 		alloc_block(p->alloc_block),
 		entry_block(p->entry_block),
@@ -369,97 +320,29 @@ public:
 		loop_next(p->loop_next),
 		function(p->function)
 	{}
-	~AST_context()
-	{
-		if (src_block)
-		{
-			auto parent = static_cast<AST_context*>(parent_namespace);
-			if (parent->need_ret.count(parent->block))
-			{
-				parent->need_ret.erase(parent->block);
-				if (need_ret.count(block)) parent->need_ret.insert(block);
-			}
-			parent->block = block;
-		}
-	}
-	
+	virtual ~AST_context();
 public:
-	void activate() { lBuilder.SetInsertPoint(block); }
+	void activate()
+		{ lBuilder.SetInsertPoint(block); }
 	void set_block(llvm::BasicBlock* b)
-	{
-		function->getBasicBlockList().push_back(block = b);
-		activate();
-	}
-	void leave_function(llvm::Value* ret = nullptr)
-	{
-		need_ret.erase(block);
-		if (!ret)
-		{
-			if (function->getReturnType() == void_type) lBuilder.CreateRetVoid();
-			else throw err("function return without value");
-		}
-		else lBuilder.CreateRet(create_implicit_cast(ret, function->getReturnType()));		
-	}
-	void cond_jump_to(llvm::Value* cond, llvm::BasicBlock* b1, llvm::BasicBlock* b2)
-	{
-		lBuilder.CreateCondBr(create_implicit_cast(cond, bool_type), b1, b2);
-		if (need_ret.count(block))
-		{
-			need_ret.insert(b1); need_ret.insert(b2); need_ret.erase(block);
-		}
-	}
-	void jump_to(llvm::BasicBlock* b)
-	{
-		lBuilder.CreateBr(b);
-		if (need_ret.count(block))
-		{
-			need_ret.insert(b); need_ret.erase(block);
-		}
-	}
-	void finish_func()
-	{
-		if (function->getReturnType() != void_type)
-		{
-			if (need_ret.count(block)) throw err("function may return without value");;
-		}
-		else leave_function();
-		lBuilder.SetInsertPoint(alloc_block);
-		lBuilder.CreateBr(entry_block);
-		llvm::verifyFunction(*function);
-		function->dump();
-	}
-	llvm::Value* alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init = nullptr)
-	{
-		if (type == void_type) throw err("cannot create variable of void type");
-		if (name == "") throw err("cannot alloc a dummy variable");
-		if (init) init = create_implicit_cast(init, type);
-		llvm::Value* alloc;
-		if (alloc_block)
-		{
-			lBuilder.SetInsertPoint(alloc_block);
-			alloc = lBuilder.CreateAlloca(type);
-			activate();
-			if (init) lBuilder.CreateStore(init, alloc);
-			add_alloc(alloc, name);
-			return alloc;
-		}
-		else
-		{
-			alloc = new llvm::GlobalVariable(*lModule, type, false, 
-				llvm::GlobalValue::ExternalLinkage, static_cast<llvm::Constant*>(init));
-			add_alloc(alloc, name);
-			return alloc;
-		}
-	}
-	llvm::BasicBlock* get_block() { return block; }
-	llvm::Function* get_function() { return function; }
+		{ function->getBasicBlockList().push_back(block = b); activate(); }
+	llvm::BasicBlock* get_block()
+		{ return block; }
+	llvm::Function* get_function()
+		{ return function; }
+	
+	llvm::Value* alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init = nullptr);
+	void cond_jump_to(llvm::Value* cond, llvm::BasicBlock* b1, llvm::BasicBlock* b2);
+	void jump_to(llvm::BasicBlock* b);
+	void leave_function(llvm::Value* ret = nullptr);
+	void finish_func();
 public:
 	static llvm::BasicBlock* new_block(const std::string& block_name)
-	{
-		return llvm::BasicBlock::Create(llvm::getGlobalContext(), block_name);
-	}
+		{ return llvm::BasicBlock::Create(llvm::getGlobalContext(), block_name); }
 };
 
 }
+
+#include "utility.cpp"
 
 #endif
