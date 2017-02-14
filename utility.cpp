@@ -207,7 +207,9 @@ void AST_context::finish_func()
 	lBuilder.SetInsertPoint(alloc_block);
 	lBuilder.CreateBr(entry_block);
 	llvm::verifyFunction(*function);
+	#ifdef WC_DEBUG
 	function->dump();
+	#endif
 }
 
 llvm::Value* AST_context::alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init)
