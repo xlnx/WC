@@ -1,6 +1,58 @@
-// AST_result
 namespace lr_parser
 {
+
+void err::alert() const
+{
+	std::cerr << "[" << ln << ", " << col << "]: " << what() << std::endl;
+	if (ptr)
+	{
+		pchar p = ptr;
+		while (*p && *p != '\n') std::cerr << *p++;
+		std::cerr << std::endl;
+		for (p = ptr; p < ptr + col; ++p) std::cerr << (*p != '\t' ? ' ' : '\t');
+		std::cerr << '^' << std::endl;
+	}
+}
+
+llvm::Value* create_implicit_cast(llvm::Value* value, llvm::Type* type)
+{
+	llvm::Type* cur_type = value->getType();
+	if (cur_type != type)
+	{
+		if (implicit_casts[type][cur_type]) return implicit_casts[type][cur_type](value);
+		AST_result res(value, false);
+		if (type == int_type || type == char_type || type == bool_type) return res.cast_to<ltype::integer>(type);
+		if (type == float_type) return res.cast_to<ltype::floating_point>(type);
+		if (type->isPointerTy()) return res.cast_to<ltype::pointer>(type);
+		if (type->isFunctionTy()) return res.cast_to<ltype::function>(type);
+		if (type->isArrayTy()) return res.cast_to<ltype::array>(type);
+		throw err("unexpected typename in casting");
+	}
+	return value;
+}
+
+llvm::Type* get_binary_sync_type(llvm::Value* LHS, llvm::Value* RHS)
+{
+	auto ltype = LHS->getType(), rtype = RHS->getType();
+	if (cast_priority[ltype] < cast_priority[rtype]) return rtype;
+	return ltype;
+}
+
+llvm::Type* binary_sync_cast(llvm::Value*& LHS, llvm::Value*& RHS, llvm::Type* type)
+{
+	if (!type)
+	{
+		auto ltype = LHS->getType(), rtype = RHS->getType();
+		if (cast_priority[ltype] < cast_priority[rtype]) LHS = create_implicit_cast(LHS, rtype);
+		else if (cast_priority[ltype] > cast_priority[rtype]) RHS = create_implicit_cast(RHS, ltype);
+	}
+	else
+	{
+		LHS = create_implicit_cast(LHS, type);
+		RHS = create_implicit_cast(RHS, type);
+	}
+	return LHS->getType();
+}
 
 llvm::Type* AST_result::get_type() const
 {
@@ -17,27 +69,8 @@ llvm::Value* AST_result::get_lvalue() const
 
 llvm::Value* AST_result::get_rvalue() const
 {
-	switch (flag)
-	{	// cast lvalue to rvalue
-	case is_lvalue: return lBuilder.CreateLoad(reinterpret_cast<llvm::Value*>(value));
-	case is_rvalue: return reinterpret_cast<llvm::Value*>(value);
-	default: throw err("invalid rvalue");
-	}
+	return get_any_among<ltype::integer, ltype::floating_point, ltype::pointer, ltype::function>(); 
 }
-
-/*llvm::Function* AST_result::get_function() const
-{
-	if (auto func_ptr = get<ltype::function>())
-		return static_cast<llvm::Function*>(func_ptr);
-	throw err("invalid function");
-}
-	
-llvm::AllocaInst* AST_result::get_array() const
-{
-	if (auto array_ptr = get<ltype::array>())
-	 	return static_cast<llvm::AllocaInst*>(array_ptr);
-	throw err("invalid array");
-}*/
 
 // AST_namespace
 void AST_namespace::add_type(llvm::Type* type, const std::string& name)

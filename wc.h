@@ -493,8 +493,8 @@ parser::expr_init_rules mexpr_rules =
 	
 	{
 		{ "%/%", left_asl, [](gen_node& syntax_node, AST_context* context){
-			auto LHS = syntax_node[0].code_gen(context).get_rvalue();
-			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
+			auto LHS = syntax_node[0].code_gen(context).get_any_among<ltype::integer, ltype::floating_point>();
+			auto RHS = syntax_node[1].code_gen(context).get_any_among<ltype::integer, ltype::floating_point>();
 			auto key = binary_sync_cast(LHS, RHS);
 			if (key == int_type || key == bool_type || key == char_type)
 			{
@@ -507,8 +507,8 @@ parser::expr_init_rules mexpr_rules =
 			throw err("unknown operator / for type: " + type_names[key]);
 		}},
 		{ "%*%", left_asl, [](gen_node& syntax_node, AST_context* context){	
-			auto LHS = syntax_node[0].code_gen(context).get_rvalue();
-			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
+			auto LHS = syntax_node[0].code_gen(context).get_any_among<ltype::integer>();
+			auto RHS = syntax_node[1].code_gen(context).get_any_among<ltype::integer>();
 			auto key = binary_sync_cast(LHS, RHS);
 			if (key == int_type || key == bool_type || key == char_type)
 			{
@@ -521,8 +521,8 @@ parser::expr_init_rules mexpr_rules =
 			throw err("unknown operator * for type: " + type_names[key]);
 		}},
 		{ "%\\%%", left_asl, [](gen_node& syntax_node, AST_context* context){
-			auto LHS = syntax_node[0].code_gen(context).get_rvalue();
-			auto RHS = syntax_node[1].code_gen(context).get_rvalue();
+			auto LHS = syntax_node[0].code_gen(context).get_any_among<ltype::integer>();
+			auto RHS = syntax_node[1].code_gen(context).get_any_among<ltype::integer>();
 			auto key = binary_sync_cast(LHS, RHS);
 			if (key == int_type || key == bool_type || key == char_type)
 			{
@@ -537,14 +537,19 @@ parser::expr_init_rules mexpr_rules =
 			auto data = syntax_node[0].code_gen(context).get_among<ltype::pointer, ltype::array>();
 			switch (data.second)
 			{
-			case 0: return AST_result(data.first, true);
+			case 0: if (static_cast<PointerType*>(data.first->getType())->getElementType()->isFunctionTy())
+					return AST_result(data.first, false);
+				return AST_result(data.first, true);
 			case 1: vector<Value*> idx = { ConstantInt::get(int_type, 0), ConstantInt::get(int_type, 0) };
 				return AST_result(GetElementPtrInst::CreateInBounds(data.first, idx, "", context->get_block()), true);
 			}
 		}},
 		{ "&%", right_asl, [](gen_node& syntax_node, AST_context* context){
-			auto RHS = syntax_node[0].code_gen(context).get_lvalue();
-			return AST_result(RHS, false);
+			auto data = syntax_node[0].code_gen(context);
+			if (auto func = data.get<ltype::pointer>())
+				if (static_cast<PointerType*>(func->getType())->getElementType()->isFunctionTy())
+					return AST_result(func, false);
+			return AST_result(data.get_lvalue(), false);
 		}},
 		{ "-%", right_asl, [](gen_node& syntax_node, AST_context* context){
 			auto RHS = syntax_node[0].code_gen(context).get_rvalue();
@@ -575,7 +580,7 @@ parser::expr_init_rules mexpr_rules =
 			switch (data.second)
 			{
 			case 1: idx.push_back(ConstantInt::get(int_type, 0));
-			case 0: idx.push_back(create_implicit_cast(syntax_node[1].code_gen(context).get_rvalue(), int_type));
+			case 0: idx.push_back(create_implicit_cast(syntax_node[1].code_gen(context).get_as<ltype::integer>(), int_type));
 			}
 			return AST_result(GetElementPtrInst::CreateInBounds(data.first, idx, "", context->get_block()), true);
 		}},

@@ -26,9 +26,19 @@ private:
 	using pointer = std::shared_ptr<attr_type>;
 public:
 	token() = default;
-	token(const std::string& n, unsigned _ln, unsigned _col, pchar _ptr,
-		const pointer& p = nullptr): name(n), ln(_ln), col(_col), ptr(_ptr), attr(p) {}
-	explicit operator bool() const { return name != ""; }
+	token(const std::string& n,
+		unsigned line,
+		unsigned column,
+		pchar src_ptr,
+		const pointer& attr_ptr = nullptr):
+		name(n),
+		ln(line),
+		col(column),
+		ptr(src_ptr),
+		attr(attr_ptr)
+	{}
+	explicit operator bool() const
+		{ return name != ""; }
 public:
 	std::string name;
 	unsigned ln;
@@ -48,13 +58,21 @@ using sub_nodes = std::vector<AST*>;
 
 struct AST
 {
-	AST(token& T): ln(T.ln), col(T.col), ptr(T.ptr) {} 
 	friend struct err;
 	sub_nodes sub;
+public:
+	AST(token& T):
+		ln(T.ln),
+		col(T.col),
+		ptr(T.ptr)
+	{} 
 	virtual AST_result code_gen(AST_context* context) = 0;
-	void append_child(AST* p) { sub.push_back(p); }
-	AST& operator[](int i) { return *sub[i]; }
-	void destroy() { for (auto& n: sub) n->destroy(); delete this; }
+	void append_child(AST* p)
+		{ sub.push_back(p); }
+	AST& operator[](int i)
+		{ return *sub[i]; }
+	void destroy()
+		{ for (auto& n: sub) n->destroy(); delete this; }
 private:
 	unsigned ln;
 	unsigned col;
@@ -65,27 +83,34 @@ AST* cur_node = nullptr;
 
 struct err:std::logic_error
 {
-	err(const std::string& s, AST& T): std::logic_error(s), ln(T.ln), col(T.col), ptr(T.ptr)
+	err(const std::string& s, AST& T):
+		std::logic_error(s),
+		ln(T.ln),
+		col(T.col),
+		ptr(T.ptr)
 	{}
-	err(const std::string& s, token& T): std::logic_error(s), ln(T.ln), col(T.col), ptr(T.ptr)
+	err(const std::string& s, token& T):
+		std::logic_error(s),
+		ln(T.ln),
+		col(T.col),
+		ptr(T.ptr)
 	{}
-	err(const std::string& s): std::logic_error(s), ln(cur_node?cur_node->ln:0), col(cur_node?cur_node->col:0),
+	err(const std::string& s): 
+		std::logic_error(s),
+		ln(cur_node?cur_node->ln:0),
+		col(cur_node?cur_node->col:0),
 		ptr(cur_node?cur_node->ptr:nullptr)
 	{}
-	err(const std::string& s, unsigned LN, unsigned COL, pchar PTR): std::logic_error(s), ln(LN), col(COL), ptr(PTR)
+	err(const std::string& s,
+		unsigned LN,
+		unsigned COL,
+		pchar PTR):
+		std::logic_error(s),
+		ln(LN),
+		col(COL),
+		ptr(PTR)
 	{}
-	virtual void alert() const
-	{
-		std::cerr << "[" << ln << ", " << col << "]: " << what() << std::endl;
-		if (ptr)
-		{
-			pchar p = ptr;
-			while (*p && *p != '\n') std::cerr << *p++;
-			std::cerr << std::endl;
-			for (p = ptr; p < ptr + col; ++p) std::cerr << (*p != '\t' ? ' ' : '\t');
-			std::cerr << '^' << std::endl;
-		}
-	}
+	virtual void alert() const;
 protected:
 	unsigned ln;
 	unsigned col;
@@ -151,58 +176,38 @@ cast_priority_map cast_priority =
 	priority_item(float_type, 3)
 };
 
-llvm::Value* create_implicit_cast(llvm::Value* value, llvm::Type* type)
-{
-	llvm::Type* cur_type = value->getType();
-	if (cur_type != type)
-	{
-		if (implicit_casts[type][cur_type]) return implicit_casts[type][cur_type](value);
-		throw err("cannot cast " + type_names[cur_type] + " to " + type_names[type] + " automatically");
-	}
-	return value;
-}
-
-llvm::Type* get_binary_sync_type(llvm::Value* LHS, llvm::Value* RHS)
-{
-	auto ltype = LHS->getType(), rtype = RHS->getType();
-	if (cast_priority[ltype] < cast_priority[rtype]) return rtype;
-	return ltype;
-}
-
-llvm::Type* binary_sync_cast(llvm::Value*& LHS, llvm::Value*& RHS, llvm::Type* type = nullptr)
-{
-	if (!type)
-	{
-		auto ltype = LHS->getType(), rtype = RHS->getType();
-		if (cast_priority[ltype] < cast_priority[rtype]) LHS = create_implicit_cast(LHS, rtype);
-		else if (cast_priority[ltype] > cast_priority[rtype]) RHS = create_implicit_cast(RHS, ltype);
-	}
-	else
-	{
-		LHS = create_implicit_cast(LHS, type);
-		RHS = create_implicit_cast(RHS, type);
-	}
-	return LHS->getType();
-}
+llvm::Value* create_implicit_cast(llvm::Value* value, llvm::Type* type);
+llvm::Type* get_binary_sync_type(llvm::Value* LHS, llvm::Value* RHS);
+llvm::Type* binary_sync_cast(llvm::Value*& LHS, llvm::Value*& RHS, llvm::Type* type = nullptr);
 
 enum ltype { integer, floating_point, function, array, pointer };
 
 class AST_result
 {
-	void* value;
+	void* value = nullptr;
 public:
 	using result_type = enum { is_none = 0, is_type, is_lvalue, is_rvalue, is_custom };
-	result_type flag;
-	AST_result(): value(nullptr), flag(is_none) {}
-	explicit AST_result(llvm::Type* p): value(p), flag(is_type) {}
-	//AST_result(llvm::Function* p): value(p), flag(is_rvalue) {}
-	AST_result(llvm::Value* p, bool islvalue): value(p), flag(islvalue ? is_lvalue : is_rvalue) {}
-	explicit AST_result(void* p): value(p), flag(is_custom) {}
+	result_type flag = is_none;
+public:
+	explicit AST_result() = default;
+	explicit AST_result(llvm::Type* p):
+		value(p),
+		flag(is_type)
+	{}
+	AST_result(llvm::Value* p,
+		bool islvalue):
+		value(p),
+		flag(islvalue ? is_lvalue : is_rvalue)
+	{}
+	explicit AST_result(void* p):
+		value(p),
+		flag(is_custom) 
+	{}
+public:
 	llvm::Type* get_type() const;
 	llvm::Value* get_lvalue() const;
 	llvm::Value* get_rvalue() const;
-	/*llvm::Function* get_function() const;
-	llvm::AllocaInst* get_array() const;*/
+	
 	template <typename T>
 		T* get_data() const
 		{
@@ -217,15 +222,25 @@ public:
 			if (get_hp<true, 0, U...>(result)) return result;
 			throw err("cannot get value among ");
 		}
+	template <ltype...U>
+		llvm::Value* get_any_among() const
+			{ return get_among<U...>().first; }
 	template <ltype T>
 		llvm::Value* get_as() const
 		{
 			if (auto result = get<T>()) return result;
 			throw err("cannot get value as ");
 		}
-private:
+	template <ltype T>
+		llvm::Value* cast_to(llvm::Type* type) const
+		{
+			if (auto res = get_casted<T>()) return res;
+			throw err("cannot cast " + type_names[reinterpret_cast<llvm::Value*>(value)->getType()]
+				+ " to " + type_names[type] + " implicitly");
+		}
 	template <ltype>
 		llvm::Value* get() const;
+private:
 	template <ltype>
 		llvm::Value* get_casted() const;
 	template <bool casted, unsigned index, ltype T, ltype...U>
@@ -240,9 +255,7 @@ private:
 		}
 	template <bool, unsigned>
 		bool get_hp(std::pair<llvm::Value*, unsigned>&) const
-		{
-			return false;
-		}
+			{ return false; }
 };
 
 // GetType Spec
@@ -286,16 +299,15 @@ template <>
 	}
 template <>
 	llvm::Value* AST_result::get_casted<ltype::array>() const
-	{
-		return nullptr;
-	}
+		{ return nullptr; }
 	
 template <>
 	llvm::Value* AST_result::get<ltype::function>() const
 	{	
 		auto ptr = reinterpret_cast<llvm::Value*>(value);
-		if (flag == is_rvalue && ptr->getType()->isFunctionTy()) 
-			return ptr;
+		if (flag == is_rvalue && ptr->getType()->isPointerTy() &&
+			static_cast<llvm::PointerType*>(ptr->getType())->getElementType()->isFunctionTy()) 
+				return ptr;
 		return nullptr;
 	}
 template <>
@@ -335,9 +347,7 @@ template <>
 	}
 template <>
 	llvm::Value* AST_result::get_casted<ltype::integer>() const
-	{
-		return nullptr;
-	}
+		{ return nullptr; }
 	
 template <>
 	llvm::Value* AST_result::get<ltype::floating_point>() const
@@ -353,9 +363,7 @@ template <>
 	}
 template <>
 	llvm::Value* AST_result::get_casted<ltype::floating_point>() const
-	{
-		return nullptr;
-	}
+		{ return nullptr; }
 
 class AST_namespace;
 class AST_namespace
@@ -365,13 +373,12 @@ class AST_namespace
 protected:
 	AST_namespace* parent_namespace = nullptr;
 public:
-	AST_namespace() {}
-	AST_namespace(AST_namespace* p): parent_namespace(p) {}
+	AST_namespace() = default;
+	AST_namespace(AST_namespace* p):
+		parent_namespace(p)
+	{}
 	virtual ~AST_namespace() = default;
-	/*void check_conflict(const std::string& name)
-	{
-		if (name_map[name].second) throw err("name conflicted: " + name);
-	}*/
+public:
 	void add_type(llvm::Type* type, const std::string& name);
 	void add_alloc(llvm::Value* alloc, const std::string& name);
 	void add_func(llvm::Function* func, const std::string& name);
@@ -390,9 +397,6 @@ class AST_context: public AST_namespace
 	llvm::BasicBlock* block = nullptr;
 	llvm::Function* function = nullptr;
 	std::set<llvm::BasicBlock*> need_ret;
-	//std::map<std::string, llvm::Type*> types;
-	//std::map<std::string, llvm::Value*> vars;
-	//std::map<std::string, llvm::Function*> funcs;
 public:
 	llvm::BasicBlock* loop_end = nullptr;
 	llvm::BasicBlock* loop_next = nullptr;
