@@ -8,6 +8,13 @@ llvm::Type* AST_result::get_type() const
 	return reinterpret_cast<llvm::Type*>(value);
 }
 
+llvm::Value* AST_result::get_lvalue() const
+{
+	if (flag == is_rvalue) throw err("cannot take address of expression");
+	if (flag != is_lvalue) throw err("invalid lvalue expression");
+	return reinterpret_cast<llvm::Value*>(value);
+}
+
 llvm::Value* AST_result::get_rvalue() const
 {
 	switch (flag)
@@ -18,26 +25,19 @@ llvm::Value* AST_result::get_rvalue() const
 	}
 }
 
-llvm::Value* AST_result::get_lvalue() const
+/*llvm::Function* AST_result::get_function() const
 {
-	if (flag == is_rvalue) throw err("cannot take address of expression");
-	if (flag != is_lvalue) throw err("invalid lvalue expression");
-	return reinterpret_cast<llvm::Value*>(value);
-}
-
-llvm::Function* AST_result::get_function() const
-{
-	if (auto func_ptr = get<llvm::FunctionType>())
+	if (auto func_ptr = get<ltype::function>())
 		return static_cast<llvm::Function*>(func_ptr);
 	throw err("invalid function");
 }
 	
 llvm::AllocaInst* AST_result::get_array() const
 {
-	if (auto array_ptr = get<llvm::ArrayType>())
+	if (auto array_ptr = get<ltype::array>())
 	 	return static_cast<llvm::AllocaInst*>(array_ptr);
 	throw err("invalid array");
-}
+}*/
 
 // AST_namespace
 void AST_namespace::add_type(llvm::Type* type, const std::string& name)

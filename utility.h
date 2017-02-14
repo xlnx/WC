@@ -95,82 +95,6 @@ protected:
 static llvm::Module *lModule = new llvm::Module("LRparser", llvm::getGlobalContext());
 static llvm::IRBuilder<> lBuilder(llvm::getGlobalContext());
 
-class AST_result
-{
-	void* value;
-public:
-	using result_type = enum { is_none = 0, is_type, is_lvalue, is_rvalue, is_custom };
-	result_type flag;
-	AST_result(): value(nullptr), flag(is_none) {}
-	explicit AST_result(llvm::Type* p): value(p), flag(is_type) {}
-	//AST_result(llvm::Function* p): value(p), flag(is_rvalue) {}
-	AST_result(llvm::Value* p, bool islvalue): value(p), flag(islvalue ? is_lvalue : is_rvalue) {}
-	explicit AST_result(void* p): value(p), flag(is_custom) {}
-	llvm::Type* get_type() const;
-	llvm::Value* get_rvalue() const;
-	llvm::Value* get_lvalue() const;
-	llvm::Function* get_function() const;
-	llvm::AllocaInst* get_array() const;
-	template <typename T>
-		T* get_data() const
-		{
-			if (flag != is_custom) throw err("invalid custom data");
-			return reinterpret_cast<T*>(value);
-		}
-	template <typename...U> 
-		std::pair<llvm::Value*, unsigned> get_among() const
-		{
-			return get_hp<0, U...>();
-		}
-private:
-	template <typename T>
-		llvm::Value* get() const
-		{
-			throw err("cannot get value of this type");
-		}
-	template <unsigned index, typename T, typename...U>
-		std::pair<llvm::Value*, unsigned> get_hp() const
-		{
-			if (auto v = get<T>()) return { v, index };
-			return get_hp<index + 1, U...>();
-		}
-	template <unsigned index>
-		std::pair<llvm::Value*, unsigned> get_hp() const
-		{
-			throw err("invalid get-value request");
-		}
-};
-
-// GetType Spec
-template <>
-	llvm::Value* AST_result::get<llvm::PointerType>() const
-	{
-		auto ptr = reinterpret_cast<llvm::Value*>(value);
-		switch (flag)
-		{	// cast lvalue to rvalue
-		case is_lvalue: if (static_cast<llvm::AllocaInst*>(ptr)->getAllocatedType()->isPointerTy())
-			return lBuilder.CreateLoad(ptr); break;
-		case is_rvalue: if (ptr->getType()->isPointerTy()) return ptr; break;
-		}
-		return nullptr;
-	}
-template <>
-	llvm::Value* AST_result::get<llvm::ArrayType>() const
-	{
-		auto ptr = reinterpret_cast<llvm::Value*>(value);
-		if (flag == is_lvalue && static_cast<llvm::AllocaInst*>(ptr)->getAllocatedType()->isArrayTy()) 
-			return ptr;
-		return nullptr;
-	}
-template <>
-	llvm::Value* AST_result::get<llvm::FunctionType>() const
-	{
-		auto ptr = reinterpret_cast<llvm::Value*>(value);
-		if (flag == is_rvalue && ptr->getType()->isFunctionTy()) 
-			return ptr;
-		return nullptr;
-	}
-
 auto void_type = lBuilder.getVoidTy();
 auto int_type = lBuilder.getInt32Ty();
 auto float_type = lBuilder.getDoubleTy();
@@ -189,28 +113,32 @@ type_name_lookup type_names =
 };
 
 // use this table to create static cast command
-using implicit_cast_lookup = std::map<std::pair<llvm::Type*, llvm::Type*>, std::function<llvm::Value*(llvm::Value*)>>;
+using implicit_cast_lookup = std::map<llvm::Type*, std::function<llvm::Value*(llvm::Value*)>>;
+using cast_dest_lookup = std::map<llvm::Type*, implicit_cast_lookup>;
 using cast_item = implicit_cast_lookup::value_type;
-implicit_cast_lookup implicit_casts =
+using dest_item = cast_dest_lookup::value_type;
+cast_dest_lookup implicit_casts =
 {	// cast from int
-	cast_item({int_type, float_type}, [](llvm::Value* v){ return lBuilder.CreateSIToFP(v, float_type); } ),
-	cast_item({int_type, char_type}, [](llvm::Value* v){ return lBuilder.CreateTrunc(v, char_type); } ),
-	cast_item({int_type, bool_type}, [](llvm::Value* v){ return lBuilder.CreateICmpNE(v, 
-		llvm::ConstantInt::get(int_type, 0)); } ),
-	// cast from float
-	cast_item({float_type, int_type}, [](llvm::Value* v){ return lBuilder.CreateFPToSI(v, int_type); } ),
-	cast_item({float_type, char_type}, [](llvm::Value* v){ return lBuilder.CreateFPToSI(v, char_type); } ),	// disable
-	cast_item({float_type, bool_type}, [](llvm::Value* v){ return lBuilder.CreateFCmpONE(v, 
-		llvm::ConstantFP::get(float_type, 0) ); } ),
-	// cast from char
-	cast_item({char_type, int_type}, [](llvm::Value* v){ return lBuilder.CreateSExt(v, int_type); } ),
-	cast_item({char_type, float_type}, [](llvm::Value* v){ return lBuilder.CreateSIToFP(v, float_type); } ),
-	cast_item({char_type, bool_type}, [](llvm::Value* v){ return lBuilder.CreateICmpNE(v,
-		llvm::ConstantInt::get(char_type, 0)); } ),
-	// cast from bool
-	cast_item({bool_type, int_type}, [](llvm::Value* v){ return lBuilder.CreateZExt(v, int_type); } ),
-	cast_item({bool_type, float_type}, [](llvm::Value* v){ return lBuilder.CreateUIToFP(v, float_type); } ),
-	cast_item({bool_type, char_type}, [](llvm::Value* v){ return lBuilder.CreateZExt(v, char_type); } ),
+	dest_item(int_type, {
+		cast_item(float_type, [](llvm::Value* v){ return lBuilder.CreateFPToSI(v, int_type); } ),	// float->int
+		cast_item(char_type, [](llvm::Value* v){ return lBuilder.CreateSExt(v, int_type); } ),		// char->int
+		cast_item(bool_type, [](llvm::Value* v){ return lBuilder.CreateZExt(v, int_type); } ),		// bool->int
+	}),
+	dest_item(char_type, {
+		cast_item(int_type, [](llvm::Value* v){ return lBuilder.CreateTrunc(v, char_type); } ),		// int->char
+		cast_item(float_type, [](llvm::Value* v){ return lBuilder.CreateFPToSI(v, char_type); } ),	// float->char
+		cast_item(bool_type, [](llvm::Value* v){ return lBuilder.CreateZExt(v, char_type); } ),		// bool->char
+	}),
+	dest_item(bool_type, {
+		cast_item(int_type, [](llvm::Value* v){ return lBuilder.CreateICmpNE(v, llvm::ConstantInt::get(int_type, 0)); } ),
+		cast_item(float_type, [](llvm::Value* v){ return lBuilder.CreateFCmpONE(v, llvm::ConstantFP::get(float_type, 0) ); } ),
+		cast_item(char_type, [](llvm::Value* v){ return lBuilder.CreateICmpNE(v, llvm::ConstantInt::get(char_type, 0)); } ),
+	}),
+	dest_item(float_type, {
+		cast_item(int_type, [](llvm::Value* v){ return lBuilder.CreateSIToFP(v, float_type); } ),
+		cast_item(bool_type, [](llvm::Value* v){ return lBuilder.CreateUIToFP(v, float_type); } ),
+		cast_item(char_type, [](llvm::Value* v){ return lBuilder.CreateSIToFP(v, float_type); } ),
+	})
 };
 
 using cast_priority_map = std::map<llvm::Type*, unsigned>;
@@ -228,8 +156,7 @@ llvm::Value* create_implicit_cast(llvm::Value* value, llvm::Type* type)
 	llvm::Type* cur_type = value->getType();
 	if (cur_type != type)
 	{
-		std::pair<llvm::Type*, llvm::Type*> key = {cur_type, type};
-		if (implicit_casts[key]) return implicit_casts[key](value);
+		if (implicit_casts[type][cur_type]) return implicit_casts[type][cur_type](value);
 		throw err("cannot cast " + type_names[cur_type] + " to " + type_names[type] + " automatically");
 	}
 	return value;
@@ -257,6 +184,178 @@ llvm::Type* binary_sync_cast(llvm::Value*& LHS, llvm::Value*& RHS, llvm::Type* t
 	}
 	return LHS->getType();
 }
+
+enum ltype { integer, floating_point, function, array, pointer };
+
+class AST_result
+{
+	void* value;
+public:
+	using result_type = enum { is_none = 0, is_type, is_lvalue, is_rvalue, is_custom };
+	result_type flag;
+	AST_result(): value(nullptr), flag(is_none) {}
+	explicit AST_result(llvm::Type* p): value(p), flag(is_type) {}
+	//AST_result(llvm::Function* p): value(p), flag(is_rvalue) {}
+	AST_result(llvm::Value* p, bool islvalue): value(p), flag(islvalue ? is_lvalue : is_rvalue) {}
+	explicit AST_result(void* p): value(p), flag(is_custom) {}
+	llvm::Type* get_type() const;
+	llvm::Value* get_lvalue() const;
+	llvm::Value* get_rvalue() const;
+	/*llvm::Function* get_function() const;
+	llvm::AllocaInst* get_array() const;*/
+	template <typename T>
+		T* get_data() const
+		{
+			if (flag != is_custom) throw err("invalid custom data");
+			return reinterpret_cast<T*>(value);
+		}
+	template <ltype...U>
+		std::pair<llvm::Value*, unsigned> get_among() const
+		{
+			std::pair<llvm::Value*, unsigned> result;
+			if (get_hp<false, 0, U...>(result)) return result;
+			if (get_hp<true, 0, U...>(result)) return result;
+			throw err("cannot get value among ");
+		}
+	template <ltype T>
+		llvm::Value* get_as() const
+		{
+			if (auto result = get<T>()) return result;
+			throw err("cannot get value as ");
+		}
+private:
+	template <ltype>
+		llvm::Value* get() const;
+	template <ltype>
+		llvm::Value* get_casted() const;
+	template <bool casted, unsigned index, ltype T, ltype...U>
+		bool get_hp(std::pair<llvm::Value*, unsigned>& result) const
+		{
+			if (auto v = casted ? get_casted<T>() : get<T>())
+			{
+				result = { v, index };
+				return true;
+			}
+			return get_hp<casted, index + 1, U...>(result);
+		}
+	template <bool, unsigned>
+		bool get_hp(std::pair<llvm::Value*, unsigned>&) const
+		{
+			return false;
+		}
+};
+
+// GetType Spec
+template <>
+	llvm::Value* AST_result::get<ltype::pointer>() const
+	{	
+		auto ptr = reinterpret_cast<llvm::Value*>(value);
+		switch (flag)
+		{	// cast lvalue to rvalue
+		case is_lvalue: if (static_cast<llvm::AllocaInst*>(ptr)->getAllocatedType()->isPointerTy())
+			return lBuilder.CreateLoad(ptr); break;
+		case is_rvalue: if (ptr->getType()->isPointerTy()) return ptr; break;
+		}
+		return nullptr;
+	}
+template <>
+	llvm::Value* AST_result::get_casted<ltype::pointer>() const
+	{
+		auto ptr = reinterpret_cast<llvm::Value*>(value);
+		switch (flag)
+		{	// cast lvalue to rvalue
+		case is_lvalue:
+			if (static_cast<llvm::AllocaInst*>(ptr)->getAllocatedType()->isArrayTy())
+			{
+				std::vector<llvm::Value*> idx = { llvm::ConstantInt::get(int_type, 0),
+					llvm::ConstantInt::get(int_type, 0) };
+				return llvm::GetElementPtrInst::CreateInBounds(ptr, idx, "", lBuilder.GetInsertBlock());
+			} break;
+		case is_rvalue: if (ptr->getType()->isFunctionTy()) return ptr; break;
+		}
+		return nullptr;
+	}
+	
+template <>
+	llvm::Value* AST_result::get<ltype::array>() const
+	{
+		auto ptr = reinterpret_cast<llvm::Value*>(value);
+		if (flag == is_lvalue && static_cast<llvm::AllocaInst*>(ptr)->getAllocatedType()->isArrayTy()) 
+			return ptr;
+		return nullptr;
+	}
+template <>
+	llvm::Value* AST_result::get_casted<ltype::array>() const
+	{
+		return nullptr;
+	}
+	
+template <>
+	llvm::Value* AST_result::get<ltype::function>() const
+	{	
+		auto ptr = reinterpret_cast<llvm::Value*>(value);
+		if (flag == is_rvalue && ptr->getType()->isFunctionTy()) 
+			return ptr;
+		return nullptr;
+	}
+template <>
+	llvm::Value* AST_result::get_casted<ltype::function>() const
+	{
+		auto ptr = reinterpret_cast<llvm::Value*>(value);
+		llvm::Type* type;
+		switch (flag)
+		{	// cast lvalue to rvalue
+		case is_lvalue: 
+			type = static_cast<llvm::AllocaInst*>(ptr)->getAllocatedType();
+			if (type->isPointerTy() && static_cast<llvm::PointerType*>(type)->getElementType()->isFunctionTy())
+			{
+				return lBuilder.CreateLoad(lBuilder.CreateLoad(ptr));
+			} break;
+		case is_rvalue:
+			type = ptr->getType();
+			if (type->isPointerTy() && static_cast<llvm::PointerType*>(type)->getElementType()->isFunctionTy())
+			{
+				return lBuilder.CreateLoad(ptr);
+			}break;
+		}
+		return nullptr;
+	}
+	
+template <>
+	llvm::Value* AST_result::get<ltype::integer>() const
+	{
+		auto ptr = reinterpret_cast<llvm::Value*>(value);
+		switch (flag)
+		{	// cast lvalue to rvalue
+		case is_lvalue: if (static_cast<llvm::AllocaInst*>(ptr)->getAllocatedType()->isIntegerTy())
+			return lBuilder.CreateLoad(ptr); break;
+		case is_rvalue: if (ptr->getType()->isIntegerTy()) return ptr; break;
+		}
+		return nullptr;
+	}
+template <>
+	llvm::Value* AST_result::get_casted<ltype::integer>() const
+	{
+		return nullptr;
+	}
+	
+template <>
+	llvm::Value* AST_result::get<ltype::floating_point>() const
+	{
+		auto ptr = reinterpret_cast<llvm::Value*>(value);
+		switch (flag)
+		{	// cast lvalue to rvalue
+		case is_lvalue: if (static_cast<llvm::AllocaInst*>(ptr)->getAllocatedType()->isFloatingPointTy())
+			return lBuilder.CreateLoad(ptr); break;
+		case is_rvalue: if (ptr->getType()->isFloatingPointTy()) return ptr; break;
+		}
+		return nullptr;
+	}
+template <>
+	llvm::Value* AST_result::get_casted<ltype::floating_point>() const
+	{
+		return nullptr;
+	}
 
 class AST_namespace;
 class AST_namespace
