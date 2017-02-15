@@ -1,0 +1,9 @@
+int shit()
+{
+	return 0;
+}
+
+int main()
+{
+	return 0;
+}

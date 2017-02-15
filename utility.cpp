@@ -206,6 +206,21 @@ void AST_context::finish_func()
 	}
 	lBuilder.SetInsertPoint(alloc_block);
 	lBuilder.CreateBr(entry_block);
+	function->setCallingConv(llvm::CallingConv::C);
+	
+	llvm::AttributeSet function_attrs;
+	llvm::SmallVector<llvm::AttributeSet, 4> attrs;
+	llvm::AttributeSet PAS;
+	{
+		llvm::AttrBuilder B;
+		B.addAttribute(llvm::Attribute::NoUnwind);
+		B.addAttribute(llvm::Attribute::NoInline);
+		PAS = llvm::AttributeSet::get(lModule->getContext(), ~0U, B);
+	}
+	attrs.push_back(PAS);
+	function_attrs = llvm::AttributeSet::get(lModule->getContext(), attrs);
+	function->setAttributes(function_attrs);
+	
 	llvm::verifyFunction(*function);
 	#ifdef WC_DEBUG
 	function->dump();

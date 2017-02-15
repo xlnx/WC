@@ -623,6 +623,7 @@ parser::init_rules mparse_rules =
 			auto cond_block = context->loop_next = AST_context::new_block("while_cond");
 			auto body_block = AST_context::new_block("while_body");
 			auto merge_block = context->loop_end = AST_context::new_block("endwhile");
+			context->jump_to(cond_block);
 			
 			context->set_block(cond_block);
 			context->cond_jump_to(syntax_node[0].code_gen(context).get_rvalue(), body_block, merge_block);

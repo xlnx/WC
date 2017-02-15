@@ -22,22 +22,22 @@ int main(int argc, char *argv[])
 	{
 		parser mparser(mlex_rules, mparse_rules, mexpr_rules);
 		ifstream is(inf);
-		ofstream os(ouf);
 		string src, dest;
 		getline(is, src, static_cast<char>(EOF));
+		is.close();
 		try
 		{
 			mparser.parse(src.c_str());
+			raw_string_ostream los(dest);
+			lModule->print(los, nullptr);
+			ofstream os(ouf);
+			os << dest;
+			os.close();
 		}
 		catch (const err& e)
 		{		// poly
 			e.alert();
 		}
-		is.close();
-		raw_string_ostream los(dest);
-		lModule->print(los, nullptr);
-		os << dest;
-		os.close();
 	}
 	catch (const err& e)		// poly
 	{
