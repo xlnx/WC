@@ -71,6 +71,7 @@ int main(int argc, char *argv[])
 	
 	string input_file_name;
 	string output_file_name;
+	string opt_str;
 	int dest_format = 0;
 	using option_callback_type = map<string, std::function<void()>>;
 	using callback = option_callback_type::value_type;
@@ -80,6 +81,9 @@ int main(int argc, char *argv[])
 		callback("-s", [&](){ dest_format = asm_format; }),
 		callback("-llvm", [&](){ dest_format = llvm_ir_format; }),
 		callback("-obj", [&](){ dest_format = object_format; }),
+		callback("-O1", [&](){ opt_str = " -O1 "; }),
+		callback("-O2", [&](){ opt_str = " -O2 "; }),
+		callback("-O3", [&](){ opt_str = " -O3 "; }),
 	};
 	
 	try
@@ -133,19 +137,19 @@ int main(int argc, char *argv[])
 			case llvm_ir_format: return 0;
 			case asm_format:
 				ret = execute_command(const_cast<char*>((
-						"llc -o " + output_file_name + " " + tmp_file_name
+						"llc -o " + output_file_name + opt_str + " " + tmp_file_name
 					).c_str()));
 				remove(tmp_file_name.c_str());
 				return ret;
 			case object_format:
 				ret = execute_command(const_cast<char*>((
-						"llc -filetype=obj -o " + output_file_name  + " " + tmp_file_name
+						"llc -filetype=obj -o " + output_file_name + opt_str + " " + tmp_file_name
 					).c_str()));
 				remove(tmp_file_name.c_str());
 				return ret;
 			case exe_format:
 				ret = execute_command(const_cast<char*>((
-						"llc -filetype=obj -o " + temp(change_suffix(output_file_name, ".o")) + " " + tmp_file_name
+						"llc -filetype=obj -o " + temp(change_suffix(output_file_name, ".o")) + opt_str + " " + tmp_file_name
 					).c_str()));
 				remove(tmp_file_name.c_str());
 				if (ret) return ret;
