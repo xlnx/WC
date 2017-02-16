@@ -266,7 +266,7 @@ template <>
 		switch (flag)
 		{	// cast lvalue to rvalue
 		case is_lvalue: if (static_cast<llvm::AllocaInst*>(ptr)->getAllocatedType()->isPointerTy())
-			return lBuilder.CreateLoad(ptr); break;
+			return lBuilder.CreateLoad(ptr, "Load"); break;
 		case is_rvalue: if (ptr->getType()->isPointerTy()) return ptr; break;
 		}
 		return nullptr;
@@ -321,13 +321,13 @@ template <>
 			type = static_cast<llvm::AllocaInst*>(ptr)->getAllocatedType();
 			if (type->isPointerTy() && static_cast<llvm::PointerType*>(type)->getElementType()->isFunctionTy())
 			{
-				return lBuilder.CreateLoad(lBuilder.CreateLoad(ptr));
+				return lBuilder.CreateLoad(lBuilder.CreateLoad(ptr, "Load"), "Load");
 			} break;
 		case is_rvalue:
 			type = ptr->getType();
 			if (type->isPointerTy() && static_cast<llvm::PointerType*>(type)->getElementType()->isFunctionTy())
 			{
-				return lBuilder.CreateLoad(ptr);
+				return lBuilder.CreateLoad(ptr, "Load");
 			}break;
 		}
 		return nullptr;
@@ -340,7 +340,7 @@ template <>
 		switch (flag)
 		{	// cast lvalue to rvalue
 		case is_lvalue: if (static_cast<llvm::AllocaInst*>(ptr)->getAllocatedType()->isIntegerTy())
-			return lBuilder.CreateLoad(ptr); break;
+			return lBuilder.CreateLoad(ptr, "Load"); break;
 		case is_rvalue: if (ptr->getType()->isIntegerTy()) return ptr; break;
 		}
 		return nullptr;
@@ -356,7 +356,7 @@ template <>
 		switch (flag)
 		{	// cast lvalue to rvalue
 		case is_lvalue: if (static_cast<llvm::AllocaInst*>(ptr)->getAllocatedType()->isFloatingPointTy())
-			return lBuilder.CreateLoad(ptr); break;
+			return lBuilder.CreateLoad(ptr, "Load"); break;
 		case is_rvalue: if (ptr->getType()->isFloatingPointTy()) return ptr; break;
 		}
 		return nullptr;
@@ -393,10 +393,11 @@ class AST_context: public AST_namespace
 {
 	llvm::BasicBlock* alloc_block = nullptr;
 	llvm::BasicBlock* entry_block = nullptr;
+	llvm::BasicBlock* return_block = nullptr;
 	llvm::BasicBlock* src_block = nullptr;
 	llvm::BasicBlock* block = nullptr;
+	llvm::Value* retval = nullptr;
 	llvm::Function* function = nullptr;
-	std::set<llvm::BasicBlock*> need_ret;
 public:
 	llvm::BasicBlock* loop_end = nullptr;
 	llvm::BasicBlock* loop_next = nullptr;
@@ -409,16 +410,24 @@ public:
 	AST_context(AST_context* p, llvm::Function* F): AST_namespace(p),
 		alloc_block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "alloc", F)),
 		entry_block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "entry", F)),
+		return_block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "return")),
 		block(entry_block),
-		need_ret({entry_block}),
 		function(F)
-	{ lBuilder.SetInsertPoint(block); }
+	{
+		if (F->getReturnType() != void_type)
+		{
+			lBuilder.SetInsertPoint(alloc_block);
+			retval = lBuilder.CreateAlloca(F->getReturnType());
+			retval->setName("retval");
+		}
+		lBuilder.SetInsertPoint(block);
+	}
 	AST_context(AST_context* p): AST_namespace(p),
 		alloc_block(p->alloc_block),
 		entry_block(p->entry_block),
+		return_block(p->return_block),
 		src_block(p->block),
 		block(p->block),
-		need_ret({block}),
 		loop_end(p->loop_end),
 		loop_next(p->loop_next),
 		function(p->function)

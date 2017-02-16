@@ -3,14 +3,15 @@ namespace lr_parser
 
 void err::alert() const
 {
-	std::cerr << "[" << ln << ", " << col << "]: " << what() << std::endl;
+	std::cerr << "wc: ";
+	(ptr ? std::cerr << "[" << ln << ", " << col << "]: " : std::cerr) << what() << std::endl;
 	if (ptr)
 	{
 		pchar p = ptr;
 		while (*p && *p != '\n') std::cerr << *p++;
 		std::cerr << std::endl;
 		for (p = ptr; p < ptr + col; ++p) std::cerr << (*p != '\t' ? ' ' : '\t');
-		std::cerr << '^' << std::endl;
+		std::cerr << '^';
 	}
 }
 
@@ -91,7 +92,7 @@ void AST_namespace::add_alloc(llvm::Value* alloc, const std::string& name)
 	{
 	case is_alloc: throw err("redefined variable: " + name);
 	default: throw err("name conflicted: " + name);
-	case is_none: name_map[name] = { alloc, is_alloc }; 
+	case is_none: name_map[name] = { alloc, is_alloc }; alloc->setName(name); 
 	}
 }
 void AST_namespace::add_func(llvm::Function* func, const std::string& name)
@@ -155,57 +156,48 @@ AST_context::~AST_context()
 {
 	if (src_block)
 	{
-		auto parent = static_cast<AST_context*>(parent_namespace);
-		if (parent->need_ret.count(parent->block))
-		{
-			parent->need_ret.erase(parent->block);
-			if (need_ret.count(block)) parent->need_ret.insert(block);
-		}
-		parent->block = block;
+		static_cast<AST_context*>(parent_namespace)->block = block;
 	}
 }
 
 void AST_context::leave_function(llvm::Value* ret)
 {
-	need_ret.erase(block);
 	if (!ret)
 	{
-		if (function->getReturnType() == void_type) lBuilder.CreateRetVoid();
+		if (function->getReturnType() == void_type) jump_to(return_block);
 		else throw err("function return without value");
 	}
-	else lBuilder.CreateRet(create_implicit_cast(ret, function->getReturnType()));		
+	else
+	{
+		lBuilder.CreateStore(create_implicit_cast(ret, function->getReturnType()), retval);
+		jump_to(return_block);
+	}
 }
 
 void AST_context::cond_jump_to(llvm::Value* cond, llvm::BasicBlock* b1, llvm::BasicBlock* b2)
 {
 	lBuilder.CreateCondBr(create_implicit_cast(cond, bool_type), b1, b2);
-	if (need_ret.count(block))
-	{
-		need_ret.insert(b1); need_ret.insert(b2); need_ret.erase(block);
-	}
 }
 
 void AST_context::jump_to(llvm::BasicBlock* b)
 {
 	lBuilder.CreateBr(b);
-	if (need_ret.count(block))
-	{
-		need_ret.insert(b); need_ret.erase(block);
-	}
 }
 
 void AST_context::finish_func()
 {
-	if (function->getReturnType() != void_type)
-	{
-		if (need_ret.count(block)) throw err("function may return without value");;
-	}
-	else 
-	{
-		if (need_ret.count(block)) leave_function();
-	}
 	lBuilder.SetInsertPoint(alloc_block);
 	lBuilder.CreateBr(entry_block);
+	
+	function->getBasicBlockList().push_back(return_block);
+	lBuilder.SetInsertPoint(block);
+	lBuilder.CreateBr(return_block);
+	
+	lBuilder.SetInsertPoint(return_block);
+	if (function->getReturnType() == void_type)
+		lBuilder.CreateRetVoid();
+	else
+		lBuilder.CreateRet(lBuilder.CreateLoad(retval, "retval_load"));
 	function->setCallingConv(llvm::CallingConv::C);
 	
 	llvm::AttributeSet function_attrs;
