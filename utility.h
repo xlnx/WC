@@ -182,11 +182,15 @@ llvm::Type* binary_sync_cast(llvm::Value*& LHS, llvm::Value*& RHS, llvm::Type* t
 
 enum ltype { integer, floating_point, function, array, pointer };
 
+using overload_map_type = std::map<llvm::Type*, void*>;
+
 class AST_result
 {
 	void* value = nullptr;
 public:
-	using result_type = enum { is_none = 0, is_type, is_lvalue, is_rvalue, is_custom };
+	enum result_type { is_none = 0, is_type, is_lvalue, is_rvalue, is_overload, is_custom };
+	using type_map_type = std::map<result_type, std::string>;
+	static type_map_type type_map;
 	result_type flag = is_none;
 public:
 	explicit AST_result() = default;
@@ -194,10 +198,13 @@ public:
 		value(p),
 		flag(is_type)
 	{}
-	AST_result(llvm::Value* p,
-		bool islvalue):
+	explicit AST_result(llvm::Value* p, bool islvalue):
 		value(p),
 		flag(islvalue ? is_lvalue : is_rvalue)
+	{}
+	explicit AST_result(overload_map_type* p):
+		value(p),
+		flag(is_overload)
 	{}
 	explicit AST_result(void* p):
 		value(p),
@@ -207,6 +214,7 @@ public:
 	llvm::Type* get_type() const;
 	llvm::Value* get_lvalue() const;
 	llvm::Value* get_rvalue() const;
+	
 	
 	template <typename T>
 		T* get_data() const
@@ -229,7 +237,7 @@ public:
 		llvm::Value* get_as() const
 		{
 			if (auto result = get<T>()) return result;
-			throw err("cannot get value as ");
+			throw err("cannot get value, target is " + type_map[flag]);
 		}
 	template <ltype T>
 		llvm::Value* cast_to(llvm::Type* type) const
@@ -258,6 +266,16 @@ private:
 			{ return false; }
 };
 
+AST_result::type_map_type AST_result::type_map =
+{
+	AST_result::type_map_type::value_type(is_none, "none"),
+	AST_result::type_map_type::value_type(is_type, "type"),
+	AST_result::type_map_type::value_type(is_lvalue, "lvalue"),
+	AST_result::type_map_type::value_type(is_rvalue, "rvalue"),
+	AST_result::type_map_type::value_type(is_overload, "overload"),
+	AST_result::type_map_type::value_type(is_custom, "custom")
+};
+
 // GetType Spec
 template <>
 	llvm::Value* AST_result::get<ltype::pointer>() const
@@ -282,7 +300,7 @@ template <>
 			{
 				std::vector<llvm::Value*> idx = { llvm::ConstantInt::get(int_type, 0),
 					llvm::ConstantInt::get(int_type, 0) };
-				return llvm::GetElementPtrInst::CreateInBounds(ptr, idx, "", lBuilder.GetInsertBlock());
+				return llvm::GetElementPtrInst::CreateInBounds(ptr, idx, "Decay", lBuilder.GetInsertBlock());
 			} break;
 		case is_rvalue: if (ptr->getType()->isFunctionTy()) return ptr; break;
 		}
@@ -305,6 +323,7 @@ template <>
 	llvm::Value* AST_result::get<ltype::function>() const
 	{	
 		auto ptr = reinterpret_cast<llvm::Value*>(value);
+		if (flag == is_overload) return ptr;
 		if (flag == is_rvalue && ptr->getType()->isPointerTy() &&
 			static_cast<llvm::PointerType*>(ptr->getType())->getElementType()->isFunctionTy()) 
 				return ptr;
@@ -368,12 +387,15 @@ template <>
 class AST_namespace;
 class AST_namespace
 {
-	enum mapped_value_type { is_none = 0, is_type, is_alloc, is_func};
-	std::map<std::string, std::pair<void*, mapped_value_type>> name_map;
-protected:
+	struct data_type
+	{
+		void* ptr = nullptr;
+		overload_map_type overload_map;
+	};
+	enum mapped_value_type { is_none = 0, is_type, is_alloc, is_overload_func };
+	std::map<std::string, std::pair<data_type, mapped_value_type>> name_map;
 	AST_namespace* parent_namespace = nullptr;
 public:
-	AST_namespace() = default;
 	AST_namespace(AST_namespace* p):
 		parent_namespace(p)
 	{}
@@ -385,35 +407,155 @@ public:
 	// get type
 	AST_result get_type(const std::string& name);
 	AST_result get_var(const std::string& name);
-	AST_result get_func(const std::string& name);
+	//AST_result get_func(const std::string& name);
 	AST_result get_id(const std::string& name);
 };
 
+class AST_context;
 class AST_context: public AST_namespace
 {
-	llvm::BasicBlock* alloc_block = nullptr;
-	llvm::BasicBlock* entry_block = nullptr;
-	llvm::BasicBlock* return_block = nullptr;
-	llvm::BasicBlock* src_block = nullptr;
-	llvm::BasicBlock* block = nullptr;
-	llvm::Value* retval = nullptr;
-	llvm::Function* function = nullptr;
+protected:
+	AST_context* parent;
 public:
-	llvm::BasicBlock* loop_end = nullptr;
-	llvm::BasicBlock* loop_next = nullptr;
 	llvm::Type* current_type = nullptr;
 	std::string current_name;
-	std::vector<std::string> function_param_name;
 	bool collect_param_name = false;
+	std::vector<std::string> function_param_name;
+	AST_context(AST_context* p):
+		AST_namespace(p),
+		parent(p)
+	{}
 public:
-	AST_context() {}
-	AST_context(AST_context* p, llvm::Function* F): AST_namespace(p),
-		alloc_block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "alloc", F)),
-		entry_block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "entry", F)),
-		return_block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "return")),
-		block(entry_block),
-		function(F)
+	virtual void alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init) = 0;
+public:
+	static llvm::BasicBlock* new_block(const std::string& block_name)
+		{ return llvm::BasicBlock::Create(llvm::getGlobalContext(), block_name); }
+};
+
+class AST_global_context: public AST_context
+{
+public:
+	AST_global_context():
+		AST_context(nullptr)
+	{}
+	void alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init = nullptr) override
 	{
+		if (type == void_type)
+			throw err("cannot create variable of void type");
+		if (name == "")
+			throw err("cannot alloc a dummy variable");
+		if (init)
+			init = create_implicit_cast(init, type);
+		auto alloc = new llvm::GlobalVariable(*lModule, type, false, 
+			llvm::GlobalValue::ExternalLinkage, static_cast<llvm::Constant*>(init));
+		add_alloc(alloc, name);
+	}
+};
+
+class AST_function_context;
+class AST_local_context: public AST_context
+{
+protected:
+	llvm::BasicBlock* block;
+	virtual llvm::BasicBlock* get_alloc_block() const
+		{ return static_cast<AST_local_context*>(parent)->get_alloc_block(); }
+	virtual llvm::Function* get_local_function()
+		{ return static_cast<AST_local_context*>(parent)->get_local_function(); }
+protected:
+	AST_local_context(AST_context* p):
+		AST_context(p),
+		block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "entry"))
+	{ activate(); }
+public:
+	AST_local_context(AST_local_context* p):
+		AST_context(p),
+		block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "block"))
+	{ p->make_br(block); }
+	virtual ~AST_local_context() override
+		{ static_cast<AST_local_context*>(parent)->block = block; }
+public:
+	void activate()
+		{ lBuilder.SetInsertPoint(block); }
+	llvm::BasicBlock* get_block()
+		{ return block; }
+	void set_block(llvm::BasicBlock* b)
+		{ get_local_function()->getBasicBlockList().push_back(block = b); activate(); }
+	void make_cond_br(llvm::Value* cond, llvm::BasicBlock* b1, llvm::BasicBlock* b2)
+		{ lBuilder.CreateCondBr(create_implicit_cast(cond, bool_type), b1, b2); }
+	void make_br(llvm::BasicBlock* b)
+		{ lBuilder.CreateBr(b); }
+	virtual void make_break()
+		{ static_cast<AST_local_context*>(parent)->make_break(); }
+	virtual void make_continue()
+		{ static_cast<AST_local_context*>(parent)->make_continue(); }
+	virtual void make_return(llvm::Value* ret = nullptr)
+		{ static_cast<AST_local_context*>(parent)->make_return(ret); }
+	void alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init) override
+	{
+		if (type == void_type)
+			throw err("cannot create variable of void type");
+		if (name == "")
+			throw err("cannot alloc a dummy variable");
+		if (init)
+			init = create_implicit_cast(init, type);
+		lBuilder.SetInsertPoint(get_alloc_block());
+		auto alloc = lBuilder.CreateAlloca(type);
+		activate();
+		if (init) lBuilder.CreateStore(init, alloc);
+		add_alloc(alloc, name);
+	}
+};
+
+class AST_loop_context: public AST_local_context
+{
+public:
+	llvm::BasicBlock* loop_next;
+	llvm::BasicBlock* loop_end;
+public:
+	AST_loop_context(AST_local_context* p):
+		AST_local_context(p),
+		loop_next(new_block("loop_next")),
+		loop_end(new_block("loop_end"))
+	{}
+public:
+	void make_break() override
+		{ make_br(loop_end); }
+	void make_continue() override
+		{ make_br(loop_next); }
+};
+
+class AST_while_loop_context: public AST_loop_context
+{
+public:
+	llvm::BasicBlock* while_body;
+public:
+	AST_while_loop_context(AST_local_context* p):
+		AST_loop_context(p),
+		while_body(new_block("while_body"))
+	{}
+};
+
+class AST_function_context: public AST_local_context
+{
+	llvm::Function* function;
+	llvm::BasicBlock* alloc_block;
+	llvm::BasicBlock* entry_block;
+	llvm::BasicBlock* return_block;
+	llvm::Value* retval;
+protected:
+	llvm::BasicBlock* get_alloc_block() const override
+		{ return alloc_block; }
+	llvm::Function* get_local_function() override
+		{ return function; }
+public:
+	AST_function_context(AST_context* p, llvm::Function* F):
+		AST_local_context(p),
+		function(F),
+		alloc_block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "alloc", F)),
+		entry_block(block),
+		return_block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "return"))
+	{
+		F->getBasicBlockList().push_back(block);
 		if (F->getReturnType() != void_type)
 		{
 			lBuilder.SetInsertPoint(alloc_block);
@@ -422,35 +564,25 @@ public:
 		}
 		lBuilder.SetInsertPoint(block);
 	}
-	AST_context(AST_context* p): AST_namespace(p),
-		alloc_block(p->alloc_block),
-		entry_block(p->entry_block),
-		return_block(p->return_block),
-		src_block(p->block),
-		block(p->block),
-		loop_end(p->loop_end),
-		loop_next(p->loop_next),
-		function(p->function)
-	{}
-	virtual ~AST_context();
+	virtual ~AST_function_context() override;
 public:
-	void activate()
-		{ lBuilder.SetInsertPoint(block); }
-	void set_block(llvm::BasicBlock* b)
-		{ function->getBasicBlockList().push_back(block = b); activate(); }
-	llvm::BasicBlock* get_block()
-		{ return block; }
-	llvm::Function* get_function()
-		{ return function; }
-	
-	llvm::Value* alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init = nullptr);
-	void cond_jump_to(llvm::Value* cond, llvm::BasicBlock* b1, llvm::BasicBlock* b2);
-	void jump_to(llvm::BasicBlock* b);
-	void leave_function(llvm::Value* ret = nullptr);
-	void finish_func();
-public:
-	static llvm::BasicBlock* new_block(const std::string& block_name)
-		{ return llvm::BasicBlock::Create(llvm::getGlobalContext(), block_name); }
+	void make_break() override
+		{ throw err("break appears outside loop"); }
+	void make_continue() override
+		{ throw err("continue appears outside loop"); }
+	void make_return(llvm::Value* ret = nullptr) override
+	{
+		if (!ret)
+		{
+			if (function->getReturnType() == void_type) make_br(return_block);
+			else throw err("function return without value");
+		}
+		else
+		{
+			lBuilder.CreateStore(create_implicit_cast(ret, function->getReturnType()), retval);
+			make_br(return_block);
+		}
+	}
 };
 
 }

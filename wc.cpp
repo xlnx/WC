@@ -10,7 +10,7 @@ const int object_format = 3;
 
 int execute_command(char* cmdline)
 {
-	STARTUPINFO si;  
+	STARTUPINFO si;
 	PROCESS_INFORMATION pi;  
 	ZeroMemory(&si, sizeof(si));
 	ZeroMemory(&pi, sizeof(pi));

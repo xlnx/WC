@@ -96,17 +96,15 @@ lexer::init_rules mlex_rules =
 			return context->get_id(T.data.attr->value);
 		}},
 		{ "continue", [](term_node&, AST_context* context){
-			if (!context->loop_next) throw err("continue appears outside loop");
-			context->jump_to(context->loop_next);
+			static_cast<AST_local_context*>(context)->make_continue();
 			return AST_result();
 		}},
 		{ "break", [](term_node&, AST_context* context){
-			if (!context->loop_end) throw err("break appears outside loop");
-			context->jump_to(context->loop_end);
+			static_cast<AST_local_context*>(context)->make_break();
 			return AST_result();
 		}},
 		{ "return", [](term_node&, AST_context* context){
-			context->leave_function();
+			static_cast<AST_local_context*>(context)->make_return();
 			return AST_result();
 		}},
 		{ "int", [](term_node&, AST_context*){ return AST_result(int_type); } },
@@ -138,8 +136,8 @@ parser::expr_init_rules mexpr_rules =
 			create_implicit_cast(RHS.first, LHS.first->getType());
 			switch (LHS.second)
 			{
-			case 0: lBuilder.CreateStore(lBuilder.CreateSDiv(LHS.first, RHS.first), alloc, "SDiv"); return val;
-			case 1: lBuilder.CreateStore(lBuilder.CreateFDiv(LHS.first, RHS.first), alloc, "FDiv"); return val;
+			case 0: lBuilder.CreateStore(lBuilder.CreateSDiv(LHS.first, RHS.first, "SDiv"), alloc); return val;
+			case 1: lBuilder.CreateStore(lBuilder.CreateFDiv(LHS.first, RHS.first, "FDiv"), alloc); return val;
 			}
 		}},
 		{ "%*=%", right_asl, [](gen_node& syntax_node, AST_context* context){
@@ -150,8 +148,8 @@ parser::expr_init_rules mexpr_rules =
 			create_implicit_cast(RHS.first, LHS.first->getType());
 			switch (LHS.second)
 			{
-			case 0: lBuilder.CreateStore(lBuilder.CreateMul(LHS.first, RHS.first), alloc, "Mul"); return val;
-			case 1: lBuilder.CreateStore(lBuilder.CreateFMul(LHS.first, RHS.first), alloc, "FMul"); return val;
+			case 0: lBuilder.CreateStore(lBuilder.CreateMul(LHS.first, RHS.first, "Mul"), alloc); return val;
+			case 1: lBuilder.CreateStore(lBuilder.CreateFMul(LHS.first, RHS.first, "FMul"), alloc); return val;
 			}
 		}},
 		{ "%\\%=%", right_asl, [](gen_node& syntax_node, AST_context* context){
@@ -162,7 +160,7 @@ parser::expr_init_rules mexpr_rules =
 			create_implicit_cast(RHS.first, LHS.first->getType());
 			switch (LHS.second)
 			{
-			case 0: lBuilder.CreateStore(lBuilder.CreateSRem(LHS.first, RHS.first), alloc, "SRem"); return val;
+			case 0: lBuilder.CreateStore(lBuilder.CreateSRem(LHS.first, RHS.first, "SRem"), alloc); return val;
 			}
 		}},
 		{ "%+=%", right_asl, [](gen_node& syntax_node, AST_context* context){
@@ -173,8 +171,8 @@ parser::expr_init_rules mexpr_rules =
 			create_implicit_cast(RHS.first, LHS.first->getType());
 			switch (LHS.second)
 			{
-			case 0: lBuilder.CreateStore(lBuilder.CreateAdd(LHS.first, RHS.first), alloc, "Add"); return val;
-			case 1: lBuilder.CreateStore(lBuilder.CreateFAdd(LHS.first, RHS.first), alloc, "FAdd"); return val;
+			case 0: lBuilder.CreateStore(lBuilder.CreateAdd(LHS.first, RHS.first, "Add"), alloc); return val;
+			case 1: lBuilder.CreateStore(lBuilder.CreateFAdd(LHS.first, RHS.first, "FAdd"), alloc); return val;
 			}
 		}},
 		{ "%-=%", right_asl, [](gen_node& syntax_node, AST_context* context){
@@ -185,8 +183,8 @@ parser::expr_init_rules mexpr_rules =
 			create_implicit_cast(RHS.first, LHS.first->getType());
 			switch (LHS.second)
 			{
-			case 0: lBuilder.CreateStore(lBuilder.CreateSub(LHS.first, RHS.first), alloc, "Sub"); return val;
-			case 1: lBuilder.CreateStore(lBuilder.CreateFSub(LHS.first, RHS.first), alloc, "FSub"); return val;
+			case 0: lBuilder.CreateStore(lBuilder.CreateSub(LHS.first, RHS.first, "Sub"), alloc); return val;
+			case 1: lBuilder.CreateStore(lBuilder.CreateFSub(LHS.first, RHS.first, "FSub"), alloc); return val;
 			}
 		}},
 		{ "%<<=%", right_asl, [](gen_node& syntax_node, AST_context* context){
@@ -197,7 +195,7 @@ parser::expr_init_rules mexpr_rules =
 			create_implicit_cast(RHS.first, LHS.first->getType());
 			switch (LHS.second)
 			{
-			case 0: lBuilder.CreateStore(lBuilder.CreateShl(LHS.first, RHS.first), alloc, "Shl"); return val;
+			case 0: lBuilder.CreateStore(lBuilder.CreateShl(LHS.first, RHS.first, "Shl"), alloc); return val;
 			}
 		}},
 		{ "%>>=%", right_asl, [](gen_node& syntax_node, AST_context* context){
@@ -208,7 +206,7 @@ parser::expr_init_rules mexpr_rules =
 			create_implicit_cast(RHS.first, LHS.first->getType());
 			switch (LHS.second)
 			{
-			case 0: lBuilder.CreateStore(lBuilder.CreateAShr(LHS.first, RHS.first), alloc, "AShr"); return val;
+			case 0: lBuilder.CreateStore(lBuilder.CreateAShr(LHS.first, RHS.first, "AShr"), alloc); return val;
 			}
 		}},
 		{ "%&=%", right_asl, [](gen_node& syntax_node, AST_context* context){
@@ -219,7 +217,7 @@ parser::expr_init_rules mexpr_rules =
 			create_implicit_cast(RHS.first, LHS.first->getType());
 			switch (LHS.second)
 			{
-			case 0: lBuilder.CreateStore(lBuilder.CreateAnd(LHS.first, RHS.first), alloc, "And"); return val;
+			case 0: lBuilder.CreateStore(lBuilder.CreateAnd(LHS.first, RHS.first, "And"), alloc); return val;
 			}
 		}},
 		{ "%^=%", right_asl, [](gen_node& syntax_node, AST_context* context){
@@ -230,7 +228,7 @@ parser::expr_init_rules mexpr_rules =
 			create_implicit_cast(RHS.first, LHS.first->getType());
 			switch (LHS.second)
 			{
-			case 0: lBuilder.CreateStore(lBuilder.CreateXor(LHS.first, RHS.first), alloc, "Xor"); return val;
+			case 0: lBuilder.CreateStore(lBuilder.CreateXor(LHS.first, RHS.first, "Xor"), alloc); return val;
 			}
 		}},
 		{ "%|=%", right_asl, [](gen_node& syntax_node, AST_context* context){
@@ -241,29 +239,30 @@ parser::expr_init_rules mexpr_rules =
 			create_implicit_cast(RHS.first, LHS.first->getType());
 			switch (LHS.second)
 			{
-			case 0: lBuilder.CreateStore(lBuilder.CreateOr(LHS.first, RHS.first), alloc, "Or"); return val;
+			case 0: lBuilder.CreateStore(lBuilder.CreateOr(LHS.first, RHS.first, "Or"), alloc); return val;
 			}
 		}}
 	},
 	
 	{
 		{ "%?%:%", right_asl, [](gen_node& syntax_node, AST_context* context){
+			auto local_context = static_cast<AST_local_context*>(context);
 			auto then_block = AST_context::new_block("then");
 			auto else_block = AST_context::new_block("else");
 			auto merge_block = AST_context::new_block("endif");
-			context->cond_jump_to(syntax_node[0].code_gen(context).get_rvalue(), then_block, else_block);
+			local_context->make_cond_br(syntax_node[0].code_gen(context).get_rvalue(), then_block, else_block);
 			
-			context->set_block(then_block);
+			local_context->set_block(then_block);
 			auto then_value = syntax_node[1].code_gen(context).get_rvalue();
-			then_block = context->get_block();
-			context->jump_to(merge_block);
+			then_block = local_context->get_block();
+			local_context->make_br(merge_block);
 			
-			context->set_block(else_block);
+			local_context->set_block(else_block);
 			auto else_value = syntax_node[2].code_gen(context).get_rvalue();
-			then_block = context->get_block();
-			context->jump_to(merge_block);
+			then_block = local_context->get_block();
+			local_context->make_br(merge_block);
 			
-			context->set_block(merge_block);
+			local_context->set_block(merge_block);
 			auto PN = lBuilder.CreatePHI(get_binary_sync_type(then_value, else_value), 2, "PHI");
 			PN->addIncoming(then_value, then_block);
 			PN->addIncoming(else_value, else_block);
@@ -439,12 +438,14 @@ parser::expr_init_rules mexpr_rules =
 			if (LHS.second == 2)
 			{
 				if (RHS.second == 1) throw err("unknown operator for pointer + float");
-				return AST_result(GetElementPtrInst::CreateInBounds(LHS.first, RHS.first, "PAdd", context->get_block()), false);
+				return AST_result(GetElementPtrInst::CreateInBounds(LHS.first, RHS.first, "PAdd",
+					static_cast<AST_local_context*>(context)->get_block()), false);
 			}
 			if (RHS.second == 2)
 			{
 				if (LHS.second == 1) throw err("unknown operator for float + pointer");
-				return AST_result(GetElementPtrInst::CreateInBounds(RHS.first, LHS.first, "PAdd", context->get_block()), false);
+				return AST_result(GetElementPtrInst::CreateInBounds(RHS.first, LHS.first, "PAdd",
+					static_cast<AST_local_context*>(context)->get_block()), false);
 			}
 			auto key = binary_sync_cast(LHS.first, RHS.first);
 			if (key == int_type || key == bool_type || key == char_type)
@@ -470,13 +471,13 @@ parser::expr_init_rules mexpr_rules =
 			{
 				if (RHS.second == 1) throw err("unknown operator for pointer + float");
 				return AST_result(GetElementPtrInst::CreateInBounds(LHS.first, lBuilder.CreateNeg(RHS.first),
-					"PSub", context->get_block()), false);
+					"PSub", static_cast<AST_local_context*>(context)->get_block()), false);
 			}
 			if (RHS.second == 2)
 			{
 				if (LHS.second == 1) throw err("unknown operator for float + pointer");
 				return AST_result(GetElementPtrInst::CreateInBounds(RHS.first, lBuilder.CreateNeg(LHS.first),
-					"PSub", context->get_block()), false);
+					"PSub", static_cast<AST_local_context*>(context)->get_block()), false);
 			}
 			auto key = binary_sync_cast(LHS.first, RHS.first);
 			if (key == int_type || key == bool_type || key == char_type)
@@ -541,7 +542,8 @@ parser::expr_init_rules mexpr_rules =
 					return AST_result(data.first, false);
 				return AST_result(data.first, true);
 			case 1: vector<Value*> idx = { ConstantInt::get(int_type, 0), ConstantInt::get(int_type, 0) };
-				return AST_result(GetElementPtrInst::CreateInBounds(data.first, idx, "PElem", context->get_block()), true);
+				return AST_result(GetElementPtrInst::CreateInBounds(data.first, idx, "PElem",
+					static_cast<AST_local_context*>(context)->get_block()), true);
 			}
 		}},
 		{ "&%", right_asl, [](gen_node& syntax_node, AST_context* context){
@@ -582,7 +584,8 @@ parser::expr_init_rules mexpr_rules =
 			case 1: idx.push_back(ConstantInt::get(int_type, 0));
 			case 0: idx.push_back(create_implicit_cast(syntax_node[1].code_gen(context).get_as<ltype::integer>(), int_type));
 			}
-			return AST_result(GetElementPtrInst::CreateInBounds(data.first, idx, "PElem", context->get_block()), true);
+			return AST_result(GetElementPtrInst::CreateInBounds(data.first, idx, "PElem",
+				static_cast<AST_local_context*>(context)->get_block()), true);
 		}},
 		{ "% ( %$ )", left_asl, [](gen_node& syntax_node, AST_context* context){	
 			auto function = static_cast<Function*>(syntax_node[0].code_gen(context).get_as<ltype::function>());
@@ -618,64 +621,59 @@ parser::init_rules mparse_rules =
 	}},
 	{ "Stmt", {
 		{ "while ( Expr ) Stmt", [](gen_node& syntax_node, AST_context* context){
-			auto loop_end = context->loop_end;
-			auto loop_next = context->loop_next;
-			auto cond_block = context->loop_next = AST_context::new_block("while_cond");
-			auto body_block = AST_context::new_block("while_body");
-			auto merge_block = context->loop_end = AST_context::new_block("endwhile");
-			context->jump_to(cond_block);
+			AST_while_loop_context while_context(static_cast<AST_local_context*>(context));
+			while_context.set_block(while_context.loop_next);
+			while_context.make_cond_br(syntax_node[0].code_gen(context).get_rvalue(),
+				while_context.while_body, while_context.loop_end);
 			
-			context->set_block(cond_block);
-			context->cond_jump_to(syntax_node[0].code_gen(context).get_rvalue(), body_block, merge_block);
+			while_context.set_block(while_context.while_body);
+			syntax_node[1].code_gen(&while_context);
+			while_context.make_br(while_context.loop_next);
 			
-			context->set_block(body_block);
-			syntax_node[1].code_gen(context);
-			context->jump_to(cond_block);
-			
-			context->set_block(merge_block);
-			context->loop_end = loop_end;
-			context->loop_next = loop_next;
+			while_context.set_block(while_context.loop_end);
 			return AST_result();
 		}},
 		{ "if ( Expr ) Stmt else Stmt", [](gen_node& syntax_node, AST_context* context){	
+			auto local_context = static_cast<AST_local_context*>(context);
 			auto then_block = AST_context::new_block("then");
 			auto else_block = AST_context::new_block("else");
 			auto merge_block = AST_context::new_block("endif");
-			context->cond_jump_to(syntax_node[0].code_gen(context).get_rvalue(), then_block, else_block);
+			local_context->make_cond_br(syntax_node[0].code_gen(context).get_rvalue(), then_block, else_block);
 			
-			context->set_block(then_block);
+			local_context->set_block(then_block);
 			syntax_node[1].code_gen(context);
-			context->jump_to(merge_block);
+			local_context->make_br(merge_block);
 			
-			context->set_block(else_block);
+			local_context->set_block(else_block);
 			syntax_node[2].code_gen(context);
-			context->jump_to(merge_block);
+			local_context->make_br(merge_block);
 			
-			context->set_block(merge_block);
+			local_context->set_block(merge_block);
 			return AST_result();
 		}},
-		{ "if ( Expr ) Stmt", [](gen_node& syntax_node, AST_context* context){	
+		{ "if ( Expr ) Stmt", [](gen_node& syntax_node, AST_context* context){
+			auto local_context = static_cast<AST_local_context*>(context);
 			auto then_block = AST_context::new_block("then");
 			auto merge_block = AST_context::new_block("endif");
-			context->cond_jump_to(syntax_node[0].code_gen(context).get_rvalue(), then_block, merge_block);
+			local_context->make_cond_br(syntax_node[0].code_gen(context).get_rvalue(), then_block, merge_block);
 			
-			context->set_block(then_block);
+			local_context->set_block(then_block);
 			syntax_node[1].code_gen(context);
-			context->jump_to(merge_block);
+			local_context->make_br(merge_block);
 			
-			context->set_block(merge_block);
+			local_context->set_block(merge_block);
 			return AST_result();
 		}},
 		{ "LocalVarDefine ;", parser::forward },
 		{ "TypeDefine ;", parser::forward },
 		{ "Expr ;", parser::forward },
 		{ "{ Block }", [](gen_node& syntax_node, AST_context* context){
-			AST_context new_context(context);
+			AST_local_context new_context(static_cast<AST_local_context*>(context));
 			syntax_node[0].code_gen(&new_context);
 			return AST_result();
 		}},
 		{ "return expr ;", [](gen_node& syntax_node, AST_context* context){
-			context->leave_function(syntax_node[1].code_gen(context).get_rvalue());
+			static_cast<AST_local_context*>(context)->make_return(syntax_node[1].code_gen(context).get_rvalue());
 			return AST_result();
 		}},
 		{ "return ;", parser::forward },
@@ -825,21 +823,14 @@ parser::init_rules mparse_rules =
 				Function::ExternalLinkage, context->current_name, lModule);
 			context->add_func(F, context->current_name);
 			context->collect_param_name = false;
-			AST_context new_context(context, F);
-			new_context.activate();
+			AST_function_context new_context(context, F);
 			unsigned i = 0;
 			for (auto itr = F->arg_begin(); itr != F->arg_end(); ++itr, ++i)
 			{
 				itr->setName(context->function_param_name[i]);
 				new_context.alloc_var(itr->getType(), context->function_param_name[i], itr);
 			}
-			/*unsigned i = 0;
-			for (auto itr = F->arg_begin(); itr != F->arg_end(); ++itr, ++i)
-			{	//itr->setName(p->second[i]->attr->value);
-				lBuilder.CreateStore(itr, new_context.alloc_var((*p)[i], p->second[i]));
-			}*/
 			syntax_node[2].code_gen(&new_context);
-			new_context.finish_func();
 			return AST_result();
 		}}
 	}},

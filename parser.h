@@ -56,7 +56,7 @@ public:
 private:
 	lexer::init_rules expr_gen(lexer::init_rules&, init_rules&, expr_init_rules&);
 protected:
-	AST_context context;
+	AST_global_context context;
 	std::set<sign> signs, terms, gens;
 	// a map from token name to gen rules
 	std::vector<rule> rules;
