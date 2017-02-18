@@ -168,7 +168,7 @@ int main(int argc, char *argv[])
 			}
 		}
 		catch (const err& e)
-		{		// poly
+		{						// poly
 			e.alert();
 		}
 	}
