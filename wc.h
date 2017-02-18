@@ -19,7 +19,12 @@ lexer::init_rules mlex_rules =
 		{ "while", "while", {word, no_attr} },
 		{ "if", "if", {word, no_attr} },
 		{ "else", "else", {word, no_attr} },
+		{ "finally", "finally", {word, no_attr} },
 		{ "for", "for", {word, no_attr} },
+		{ "do", "do", {word, no_attr} },
+		{ "switch", "switch", {word, no_attr} },
+		{ "case", "case", {word, no_attr} },
+		{ "default", "default", {word, no_attr} },
 		{ "true", "true", {word} },
 		{ "false", "false", {word} },
 		//
@@ -619,16 +624,132 @@ parser::init_rules mparse_rules =
 		{ "StructDefine;", parser::forward },
 		{ "GlobalVarDefine;", parser::forward }
 	}},
+	{ "CasesWithoutDefault", {
+		{ "case ConstExpr : StmtEmptyBlock CasesWithoutDefault", [](gen_node& syntax_node, AST_context* context){
+			auto label = static_cast<ConstantInt*>(syntax_node[0].code_gen(context).get_as<ltype::integer>());
+			auto block_val = syntax_node[1].code_gen(context);
+			auto block = block_val.flag ? block_val.get_data<llvm::BasicBlock>() : nullptr;
+			auto switch_context = static_cast<AST_switch_context*>(context);
+			if (!switch_context->default_block && block) switch_context->default_block = block;
+			switch_context->cases.push_back(make_pair(label, block));
+			syntax_node[2].code_gen(context);
+			return AST_result();
+		}},
+		{ "", parser::empty }
+	}},
+	{ "Cases", {
+		{ "case ConstExpr : StmtEmptyBlock Cases", [](gen_node& syntax_node, AST_context* context){
+			auto label = static_cast<ConstantInt*>(syntax_node[0].code_gen(context).get_as<ltype::integer>());
+			auto block_val = syntax_node[1].code_gen(context);
+			auto block = block_val.flag ? block_val.get_data<llvm::BasicBlock>() : nullptr;
+			static_cast<AST_switch_context*>(context)->cases.push_back(make_pair(label, block));
+			syntax_node[2].code_gen(context);
+			return AST_result();
+		}},
+		{ "default : StmtEmptyBlock CasesWithoutDefault", [](gen_node& syntax_node, AST_context* context){
+			auto block_val = syntax_node[0].code_gen(context);
+			static_cast<AST_switch_context*>(context)->default_block = block_val.flag ?
+				block_val.get_data<llvm::BasicBlock>() : nullptr;
+			syntax_node[1].code_gen(context);
+			return AST_result();
+		}},
+		{ "", parser::empty }
+	}},
 	{ "Stmt", {
+		{ "switch ( Expr ) { Cases }", [](gen_node& syntax_node, AST_context* context){
+			AST_switch_context switch_context(static_cast<AST_local_context*>(context));
+			auto value = syntax_node[0].code_gen(context).get_as<ltype::integer>();
+			switch_context.make_br(switch_context.switch_block);
+			syntax_node[1].code_gen(&switch_context);
+			
+			switch_context.set_block(switch_context.switch_block);
+			if (!switch_context.default_block) switch_context.default_block = switch_context.switch_end;
+			auto sch = SwitchInst::Create(value, switch_context.default_block, switch_context.cases.size(),
+				switch_context.get_block());
+			for (auto itr = switch_context.cases.begin(); itr != switch_context.cases.end(); ++itr)
+			{
+				for (auto sitr = itr + 1; sitr != switch_context.cases.end(); ++sitr)
+				{
+					if (itr->first->getValue() == sitr->first->getValue())
+					throw err("case value redeclared");
+				}
+			}
+			for (auto itr = switch_context.cases.rbegin(); itr != switch_context.cases.rend(); ++itr)
+			{
+				if (itr->second == nullptr) itr->second = itr == switch_context.cases.rbegin() ?
+					switch_context.switch_end : (itr - 1)->second;
+			}
+			for (auto c: switch_context.cases)
+			{
+				sch->addCase(c.first, c.second);
+			}
+			switch_context.set_block(switch_context.switch_end);
+			return AST_result();
+		}},
+		{ "while ( Expr ) Stmt finally Stmt", [](gen_node& syntax_node, AST_context* context){
+			AST_while_loop_context while_context(static_cast<AST_local_context*>(context));
+			auto loop_finally = context->new_block("loop_finally");
+			
+			while_context.make_br(while_context.loop_next);
+			while_context.set_block(while_context.loop_next);
+			while_context.make_cond_br(syntax_node[0].code_gen(&while_context).get_rvalue(),
+				while_context.while_body, loop_finally);
+			
+			while_context.set_block(while_context.while_body);
+			syntax_node[1].code_gen(&while_context);
+			while_context.make_br(while_context.loop_next);
+			
+			while_context.set_block(loop_finally);
+			syntax_node[2].code_gen(context);
+			while_context.make_br(while_context.loop_end);
+			
+			while_context.set_block(while_context.loop_end);
+			return AST_result();
+		}},
 		{ "while ( Expr ) Stmt", [](gen_node& syntax_node, AST_context* context){
 			AST_while_loop_context while_context(static_cast<AST_local_context*>(context));
+			while_context.make_br(while_context.loop_next);
 			while_context.set_block(while_context.loop_next);
-			while_context.make_cond_br(syntax_node[0].code_gen(context).get_rvalue(),
+			while_context.make_cond_br(syntax_node[0].code_gen(&while_context).get_rvalue(),
 				while_context.while_body, while_context.loop_end);
 			
 			while_context.set_block(while_context.while_body);
 			syntax_node[1].code_gen(&while_context);
 			while_context.make_br(while_context.loop_next);
+			
+			while_context.set_block(while_context.loop_end);
+			return AST_result();
+		}},
+		{ "do Stmt while ( Expr ) finally Stmt", [](gen_node&syntax_node, AST_context* context){
+			AST_while_loop_context while_context(static_cast<AST_local_context*>(context));
+			auto loop_finally = context->new_block("loop_finally");
+			
+			while_context.make_br(while_context.loop_next);
+			while_context.set_block(while_context.loop_next);
+			syntax_node[0].code_gen(&while_context);
+			while_context.make_br(while_context.while_body);
+			
+			while_context.set_block(while_context.while_body);
+			while_context.make_cond_br(syntax_node[1].code_gen(&while_context).get_rvalue(),
+				while_context.loop_next, loop_finally);
+				
+			while_context.set_block(loop_finally);
+			syntax_node[2].code_gen(context);
+			while_context.make_br(while_context.loop_end);
+			
+			while_context.set_block(while_context.loop_end);
+			return AST_result();
+		}},
+		{ "do Stmt while ( Expr )", [](gen_node&syntax_node, AST_context* context){
+			AST_while_loop_context while_context(static_cast<AST_local_context*>(context));
+			while_context.make_br(while_context.loop_next);
+			while_context.set_block(while_context.loop_next);
+			syntax_node[0].code_gen(&while_context);
+			while_context.make_br(while_context.while_body);
+			
+			while_context.set_block(while_context.while_body);
+			while_context.make_cond_br(syntax_node[1].code_gen(&while_context).get_rvalue(),
+				while_context.loop_next, while_context.loop_end);
 			
 			while_context.set_block(while_context.loop_end);
 			return AST_result();
@@ -667,11 +788,7 @@ parser::init_rules mparse_rules =
 		{ "LocalVarDefine ;", parser::forward },
 		{ "TypeDefine ;", parser::forward },
 		{ "Expr ;", parser::forward },
-		{ "{ Block }", [](gen_node& syntax_node, AST_context* context){
-			AST_local_context new_context(static_cast<AST_local_context*>(context));
-			syntax_node[0].code_gen(&new_context);
-			return AST_result();
-		}},
+		{ "StmtBlock", parser::forward },
 		{ "return expr ;", [](gen_node& syntax_node, AST_context* context){
 			static_cast<AST_local_context*>(context)->make_return(syntax_node[1].code_gen(context).get_rvalue());
 			return AST_result();
@@ -680,6 +797,18 @@ parser::init_rules mparse_rules =
 		{ "break ;", parser::forward },
 		{ "continue ;", parser::forward },
 		{ ";", parser::empty }
+	}},
+	{ "StmtEmptyBlock", {
+		{ "StmtBlock", parser::forward },
+		{ "", parser::empty }
+	}},
+	{ "StmtBlock", {
+		{ "{ Block }", [](gen_node& syntax_node, AST_context* context){
+			AST_local_context new_context(static_cast<AST_local_context*>(context));
+			auto block = new_context.get_block();
+			syntax_node[0].code_gen(&new_context);
+			return AST_result(reinterpret_cast<void*>(block));
+		}}
 	}},
 	{ "Block", {
 		{ "Block Stmt", parser::expand },

@@ -219,7 +219,7 @@ public:
 	template <typename T>
 		T* get_data() const
 		{
-			if (flag != is_custom) throw err("invalid custom data");
+			if (flag != is_custom) throw err("invalid custom data, target is " + type_map[flag]);
 			return reinterpret_cast<T*>(value);
 		}
 	template <ltype...U>
@@ -470,7 +470,7 @@ public:
 	AST_local_context(AST_local_context* p):
 		AST_context(p),
 		block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "block"))
-	{ p->make_br(block); }
+	{ p->make_br(block); set_block(block); }
 	virtual ~AST_local_context() override
 		{ static_cast<AST_local_context*>(parent)->block = block; }
 public:
@@ -533,6 +533,25 @@ public:
 		AST_loop_context(p),
 		while_body(new_block("while_body"))
 	{}
+};
+
+class AST_switch_context: public AST_local_context
+{
+public:
+	llvm::BasicBlock* switch_block;
+	llvm::BasicBlock* switch_end;
+	llvm::BasicBlock* default_block;
+	std::vector<std::pair<llvm::ConstantInt*, llvm::BasicBlock*>> cases;
+public:
+	AST_switch_context(AST_local_context* p):
+		AST_local_context(p),
+		switch_block(new_block("switch_body")),
+		switch_end(new_block("switch_end")),
+		default_block(switch_end)
+	{}
+public:
+	void make_break() override
+		{ make_br(switch_end); }
 };
 
 class AST_function_context: public AST_local_context

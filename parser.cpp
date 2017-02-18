@@ -259,12 +259,12 @@ parser::parser(lexer::init_rules& lR, init_rules& iR, expr_init_rules& eiR, std:
 							is_sub = true;
 							for (auto& T: NEW)
 							{
+								r_id = std::min(T.first, r_id);
 								if (!closures[j].count(T))
 								{
 									is_sub = false;
 									break;
 								}
-								r_id = std::min(T.first, r_id);
 							}
 							if (is_sub) break;
 						}
@@ -278,6 +278,7 @@ parser::parser(lexer::init_rules& lR, init_rules& iR, expr_init_rules& eiR, std:
 							GOTO[i][sgn] = closures.size();
 							//std::cout << sgn << std::endl;
 							GEN(NEW); // generate this closure
+							//if (ACTION[i][sgn] != 0) std::cerr << sgn << " " << ACTION[i][sgn] << " " << r_id << std::endl;
 							switch (ACTION[i][sgn])			// ambigious
 							{
 							case a_move_in: throw parser_err("Not SLR at " + sgn);

@@ -37,16 +37,22 @@ int execute_command(char* cmdline)
 	return ret;
 }
 
-string temp(const string& s)
+string temp(string s)
 {
-	return "$tmp_output_" + s + "~";
+	s += "~";
+	auto str_begin = s.c_str();
+	auto p = str_begin + s.length();
+	while (p != str_begin && *p != '\\') --p;
+	if (*p == '\\') ++p;
+	s.insert(p - str_begin, "$tmp_output_");
+	return s;
 }
 
 string change_suffix(string s, const string& suffix)
-{	
+{
 	auto str_begin = s.c_str();
 	auto p = str_begin + s.length();
-	while (p != str_begin && *p != '.') --p;
+	while (p != str_begin && *p != '.' && *p != '\\') --p;
 	if (*p == '.')
 	{
 		s.resize(p - str_begin);
@@ -81,6 +87,7 @@ int main(int argc, char *argv[])
 		callback("-s", [&](){ dest_format = asm_format; }),
 		callback("-llvm", [&](){ dest_format = llvm_ir_format; }),
 		callback("-obj", [&](){ dest_format = object_format; }),
+		callback("-O", [&](){ opt_str = " -O1 "; }),
 		callback("-O1", [&](){ opt_str = " -O1 "; }),
 		callback("-O2", [&](){ opt_str = " -O2 "; }),
 		callback("-O3", [&](){ opt_str = " -O3 "; }),
