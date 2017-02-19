@@ -4,7 +4,7 @@ struct A
 	float b;
 };
 
-(int a, int b)int sum
+fn (int a, int b) -> int sum
 {
 	int result = 0;
 	A a_inst;
@@ -24,7 +24,7 @@ struct A
 	return result;
 }
 
-(int a, int b)int swh
+fn (int a, int b) -> int swh
 {
 	switch (a)
 	{
@@ -42,13 +42,13 @@ struct A
 	return -a | b;
 }
 
-(int x)int fib
+fn (int x) -> int fib
 {
 	if (x < 3) return 1;
 	else return fib(x - 1) + fib(x - 2);
 }
 
-(ptr(int L, int R)int f, int L, int R)int calc
+fn (ptr fn(int, int)->int f, int L, int R) -> int calc
 {
 	
 }

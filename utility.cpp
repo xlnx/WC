@@ -4,7 +4,7 @@ namespace lr_parser
 void err::alert() const
 {
 	std::cerr << "wc: ";
-	(ptr ? std::cerr << "[" << ln << ", " << col << "]: " : std::cerr) << what() << std::endl;
+	(ptr ? std::cerr << ln + 1 << ": " << col << ": " : std::cerr) << what() << std::endl;
 	if (ptr)
 	{
 		pchar p = ptr;
@@ -84,7 +84,7 @@ void AST_namespace::add_type(llvm::Type* type, const std::string& name)
 	{
 	case is_type: throw err("redefined type: " + name);
 	default: throw err("name conflicted: " + name);
-	case is_none: name_map[name].second = is_type; name_map[name].first.ptr = type;
+	case is_none: name_map[name].second = is_type; name_map[name].first = type;
 	}
 }
 
@@ -95,23 +95,29 @@ void AST_namespace::add_alloc(llvm::Value* alloc, const std::string& name)
 	{
 	case is_alloc: throw err("redefined variable: " + name);
 	default: throw err("name conflicted: " + name);
-	case is_none: name_map[name].second = is_alloc; name_map[name].first.ptr = alloc; alloc->setName(name); 
+	case is_none: name_map[name].second = is_alloc; name_map[name].first = alloc; alloc->setName(name); 
 	}
 }
 
 void AST_namespace::add_func(llvm::Function* func, const std::string& name)
 {
 	if (name == "") throw err("cannot define a dummy function");
-	auto type = func->getType();
+	auto type = func->getFunctionType();
 	switch (name_map[name].second)
 	{
-	case is_overload_func:
-		if (name_map[name].first.overload_map[type])
+	case is_overload_func: {
+		auto map = reinterpret_cast<overload_map_type*>(name_map[name].first);
+		if (map->operator[](gen_sig(type)))
 			throw err("redefined function: " + name + " with signature " + type_names[type]);
-		name_map[name].first.overload_map[type] = func; break;
+		map->operator[](gen_sig(type)) = func; break;
+	}
 	default: throw err("name conflicted: " + name);
-	case is_none: name_map[name].second = is_overload_func;
-		name_map[name].first.ptr = func;//overload_map[type] = func;
+	case is_none: {
+		name_map[name].second = is_overload_func;
+		auto map = new overload_map_type;
+		map->operator[](gen_sig(type)) = func;
+		name_map[name].first = map;
+	}
 	}
 }
 
@@ -151,7 +157,7 @@ AST_result AST_namespace::get_type(const std::string& name)
 {
 	switch (name_map[name].second)
 	{
-	case is_type: return AST_result(reinterpret_cast<llvm::Type*>(name_map[name].first.ptr));
+	case is_type: return AST_result(reinterpret_cast<llvm::Type*>(name_map[name].first));
 	case is_none: if (parent_namespace) return parent_namespace->get_type(name);
 		else throw err("undefined type: " + name);
 	default: throw err("name \"" + name + "\" in this context is not typename");
@@ -162,8 +168,8 @@ AST_result AST_namespace::get_var(const std::string& name)
 {
 	switch (name_map[name].second)
 	{
-	case is_alloc: return AST_result(reinterpret_cast<llvm::Value*>(name_map[name].first.ptr), true);
-	case is_overload_func: return AST_result(reinterpret_cast<llvm::Value*>(name_map[name].first.ptr), false);
+	case is_alloc: return AST_result(reinterpret_cast<llvm::Value*>(name_map[name].first), true);
+	case is_overload_func: return AST_result(reinterpret_cast<overload_map_type*>(name_map[name].first));
 	case is_none: if (parent_namespace) return parent_namespace->get_var(name);
 		else throw err("undefined variable: " + name);
 	default: throw err("name \"" + name + "\" in this context is not variable");
@@ -185,9 +191,9 @@ AST_result AST_namespace::get_id(const std::string& name)
 {
 	switch (name_map[name].second)
 	{
-	case is_type: return AST_result(reinterpret_cast<llvm::Type*>(name_map[name].first.ptr));
-	case is_alloc: return AST_result(reinterpret_cast<llvm::Value*>(name_map[name].first.ptr), true);
-	case is_overload_func: return AST_result(reinterpret_cast<llvm::Function*>(name_map[name].first.ptr), false/*overload_map*/);
+	case is_type: return AST_result(reinterpret_cast<llvm::Type*>(name_map[name].first));
+	case is_alloc: return AST_result(reinterpret_cast<llvm::Value*>(name_map[name].first), true);
+	case is_overload_func: return AST_result(reinterpret_cast<overload_map_type*>(name_map[name].first));
 	case is_none: if (parent_namespace) return parent_namespace->get_id(name);
 		else throw err("undefined identifier: " + name);
 	}

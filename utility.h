@@ -180,9 +180,17 @@ llvm::Value* create_implicit_cast(llvm::Value* value, llvm::Type* type);
 llvm::Type* get_binary_sync_type(llvm::Value* LHS, llvm::Value* RHS);
 llvm::Type* binary_sync_cast(llvm::Value*& LHS, llvm::Value*& RHS, llvm::Type* type = nullptr);
 
-enum ltype { integer, floating_point, function, array, pointer, wstruct };
+enum ltype { integer, floating_point, function, array, pointer, wstruct, overload };
 
-using overload_map_type = std::map<llvm::Type*, void*>;
+using func_sig = std::vector<llvm::Type*>;
+using overload_map_type = std::map<func_sig, llvm::Function*>;
+func_sig gen_sig(llvm::FunctionType* ft)
+{
+	func_sig result;
+	for (auto itr = ft->param_begin(); itr != ft->param_end(); ++itr)
+		result.push_back(*itr);
+	return result;
+}
 
 class AST_result
 {
@@ -321,13 +329,21 @@ template <>
 	
 template <>
 	llvm::Value* AST_result::get<ltype::function>() const
-	{	
-		auto ptr = reinterpret_cast<llvm::Value*>(value);
-		if (flag == is_overload) return ptr;
-		if (flag == is_rvalue && ptr->getType()->isPointerTy() &&
-			static_cast<llvm::PointerType*>(ptr->getType())->getElementType()->isFunctionTy()) 
-				return ptr;
-		return nullptr;
+	{
+		switch (flag)
+		{
+		case is_overload: {
+			auto ptr = reinterpret_cast<overload_map_type*>(value);
+			if (ptr->size() == 1) return ptr->begin()->second;
+			throw err("ambigious reference to overloaded function");
+		}
+		case is_rvalue: {
+			auto ptr = reinterpret_cast<llvm::Value*>(value);
+			if (ptr->getType()->isPointerTy() && static_cast<llvm::PointerType*>(
+				ptr->getType())->getElementType()->isFunctionTy()) return ptr;
+		}
+		default: return nullptr;
+		}
 	}
 template <>
 	llvm::Value* AST_result::get_casted<ltype::function>() const
@@ -351,6 +367,17 @@ template <>
 		}
 		return nullptr;
 	}
+	
+template <>
+	llvm::Value* AST_result::get<ltype::overload>() const
+	{
+		if (flag == is_overload)
+			return reinterpret_cast<llvm::Value*>(value);
+		return nullptr;
+	}
+template <>
+	llvm::Value* AST_result::get_casted<ltype::overload>() const
+		{ return nullptr; }
 	
 template <>
 	llvm::Value* AST_result::get<ltype::integer>() const
@@ -404,13 +431,8 @@ class AST_struct_context;
 class AST_namespace
 {
 	friend class AST_struct_context;
-	struct data_type
-	{
-		void* ptr = nullptr;
-		overload_map_type overload_map;
-	};
 	enum mapped_value_type { is_none = 0, is_type, is_alloc, is_overload_func };
-	std::map<std::string, std::pair<data_type, mapped_value_type>> name_map;
+	std::map<std::string, std::pair<void*, mapped_value_type>> name_map;
 	std::map<llvm::StructType*, AST_struct_context*> typed_namespace_map;
 	AST_namespace* parent_namespace = nullptr;
 public:

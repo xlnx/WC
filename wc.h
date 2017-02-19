@@ -23,6 +23,8 @@ lexer::init_rules mlex_rules =
 		{ "for", "for", {word, no_attr} },
 		{ "do", "do", {word, no_attr} },
 		{ "ptr", "ptr", {word, no_attr} },
+		{ "fn", "fn", {word, no_attr} },
+		{ "arr", "arr", {word, no_attr} },
 		{ "switch", "switch", {word, no_attr} },
 		{ "case", "case", {word, no_attr} },
 		{ "default", "default", {word, no_attr} },
@@ -594,13 +596,27 @@ parser::expr_init_rules mexpr_rules =
 				static_cast<AST_local_context*>(context)->get_block()), true);
 		}},
 		{ "% ( %$ )", left_asl, [](gen_node& syntax_node, AST_context* context){	
-			auto function = static_cast<Function*>(syntax_node[0].code_gen(context).get_as<ltype::function>());
+			auto fdata = syntax_node[0].code_gen(context).get_among<ltype::overload, ltype::function>();
 			auto params = syntax_node[1].code_gen(context).get_data<std::vector<Value*>>();
-			auto function_proto = function->getFunctionType();
-			if (function_proto->getNumParams() != params->size())
-				throw err("function param number mismatch");
-			for (unsigned i = 0; i < params->size(); ++i)
-				(*params)[i] = create_implicit_cast((*params)[i], function_proto->getParamType(i));
+			llvm::Function* function = nullptr;
+			switch (fdata.second)
+			{
+			case 1: {
+				function = static_cast<llvm::Function*>(fdata.first);
+				auto function_proto = function->getFunctionType();
+				if (function_proto->getNumParams() != params->size())
+					throw err("function param number mismatch");
+				for (unsigned i = 0; i < params->size(); ++i)
+					(*params)[i] = create_implicit_cast((*params)[i], function_proto->getParamType(i));
+			}
+			case 0: {
+				func_sig sig;
+				for (auto arg: *params)
+					{ sig.push_back(arg->getType()); }
+				function = (*reinterpret_cast<overload_map_type*>(fdata.first))[sig];
+				if (!function) throw err("none of the overloaded functions matches the given param");
+			}
+			}
 			auto call_inst = lBuilder.CreateCall(function, *params, "Call");
 			delete params;
 			return AST_result(call_inst, false);
@@ -849,7 +865,7 @@ parser::init_rules mparse_rules =
 			type_names[ret] = type_names[base_type] + " ptr";
 			return AST_result(ret);
 		}},
-		{ "( FunctionParams ) Type", [](gen_node& syntax_node, AST_context* context){
+		{ "fn ( FunctionParams ) -> Type", [](gen_node& syntax_node, AST_context* context){
 			auto base_type = syntax_node[1].code_gen(context).get_type();
 			if (base_type->isArrayTy())
 				throw err("function cannot return an array");
@@ -869,7 +885,7 @@ parser::init_rules mparse_rules =
 			delete params;
 			return AST_result(ret);
 		}},
-		{ "[ ConstExpr ] Type", [](gen_node& syntax_node, AST_context* context){
+		{ "arr ConstExpr Type", [](gen_node& syntax_node, AST_context* context){
 			auto base_type = syntax_node[1].code_gen(context).get_type();
 			if (base_type == void_type)
 				throw err("cannot create array of void type");
@@ -929,9 +945,20 @@ parser::init_rules mparse_rules =
 			auto bak_collect = context->collect_param_name;
 			context->collect_param_name = false;
 			
-			auto type = syntax_node[0].code_gen(context);			
+			auto type = syntax_node[0].code_gen(context).get_type();	
+			if (type->isFunctionTy() || type->isVoidTy()) throw err("type " + type_names[type] + " is invalid argument type");
 			if (context->collect_param_name = bak_collect)
 				context->function_param_name.push_back(static_cast<term_node&>(syntax_node[1]).data.attr->value);
+			return AST_result(type);
+		}},
+		{ "Type", [](gen_node& syntax_node, AST_context* context){
+			auto bak_collect = context->collect_param_name;
+			context->collect_param_name = false;
+			
+			auto type = syntax_node[0].code_gen(context).get_type();	
+			if (type->isFunctionTy() || type->isVoidTy()) throw err("type " + type_names[type] + " is invalid argument type");
+			if (context->collect_param_name = bak_collect)
+				context->function_param_name.push_back("");
 			return AST_result(type);
 		}}
 	}},
