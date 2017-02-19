@@ -692,6 +692,12 @@ public:
 		}
 	}
 };
+/*
+class AST_method_context: public AST_function_context
+{
+public:
+	AST_method_context:
+};*/
 
 }
 

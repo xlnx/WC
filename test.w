@@ -24,6 +24,11 @@ fn (int a, int b) -> int sum
 	return result;
 }
 
+fn (int a, int b, int c) -> int sum
+{
+	return a + b + c; 
+}
+
 fn (int a, int b) -> int swh
 {
 	switch (a)
