@@ -99,6 +99,17 @@ void AST_namespace::add_alloc(llvm::Value* alloc, const std::string& name)
 	}
 }
 
+void AST_namespace::add_constant(llvm::Value* constant, const std::string& name)
+{
+	if (name == "") throw err("cannot define a dummy variable");
+	switch (name_map[name].second)
+	{
+	case is_constant: throw err("redefined constant: " + name);
+	default: throw err("name conflicted: " + name);
+	case is_none: name_map[name].second = is_constant; name_map[name].first = constant;
+	}
+}
+
 void AST_namespace::add_func(llvm::Function* func, const std::string& name)
 {
 	if (name == "") throw err("cannot define a dummy function");
@@ -107,15 +118,18 @@ void AST_namespace::add_func(llvm::Function* func, const std::string& name)
 	{
 	case is_overload_func: {
 		auto map = reinterpret_cast<overload_map_type*>(name_map[name].first);
-		if (map->operator[](gen_sig(type)))
-			throw err("redefined function: " + name + " with signature " + type_names[type]);
-		map->operator[](gen_sig(type)) = func; break;
+		auto& fndata = map->operator[](gen_sig(type));
+		if (fndata) throw err("redefined function: " + name + " with signature " + type_names[type]);
+		fndata.ptr = func;
+		fndata.flag = function_meta::is_function; break;
 	}
 	default: throw err("name conflicted: " + name);
 	case is_none: {
 		name_map[name].second = is_overload_func;
 		auto map = new overload_map_type;
-		map->operator[](gen_sig(type)) = func;
+		auto& fndata = map->operator[](gen_sig(type));
+		fndata.ptr = func;
+		fndata.flag = function_meta::is_function;
 		name_map[name].first = map;
 	}
 	}
@@ -187,15 +201,16 @@ AST_result AST_namespace::get_var(const std::string& name)
 	}
 }*/
 
-AST_result AST_namespace::get_id(const std::string& name)
+AST_result AST_namespace::get_id(const std::string& name, bool precise)
 {
 	switch (name_map[name].second)
 	{
-	case is_type: return AST_result(reinterpret_cast<llvm::Type*>(name_map[name].first));
-	case is_alloc: return AST_result(reinterpret_cast<llvm::Value*>(name_map[name].first), true);
+	case is_type: return get_type(name);
+	case is_alloc: return get_var(name);
 	case is_overload_func: return AST_result(reinterpret_cast<overload_map_type*>(name_map[name].first));
-	case is_none: if (parent_namespace) return parent_namespace->get_id(name);
-		else throw err("undefined identifier: " + name);
+	case is_constant: return AST_result(reinterpret_cast<llvm::Value*>(name_map[name].first), false);
+	case is_none: if (parent_namespace && !precise) return parent_namespace->get_id(name);
+		else throw err("undefined identifier " + name + " in this namespace");
 	}
 }
 

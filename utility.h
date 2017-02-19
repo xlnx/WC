@@ -180,10 +180,17 @@ llvm::Value* create_implicit_cast(llvm::Value* value, llvm::Type* type);
 llvm::Type* get_binary_sync_type(llvm::Value* LHS, llvm::Value* RHS);
 llvm::Type* binary_sync_cast(llvm::Value*& LHS, llvm::Value*& RHS, llvm::Type* type = nullptr);
 
+class AST_struct_context;
 enum ltype { integer, floating_point, function, array, pointer, wstruct, overload };
-
+struct function_meta
+{
+	llvm::Function* ptr = nullptr;
+	enum { is_function, is_method } flag;
+	AST_struct_context* parent = nullptr;
+	explicit operator bool () const { return ptr; }
+};
 using func_sig = std::vector<llvm::Type*>;
-using overload_map_type = std::map<func_sig, llvm::Function*>;
+using overload_map_type = std::map<func_sig, function_meta>;
 func_sig gen_sig(llvm::FunctionType* ft)
 {
 	func_sig result;
@@ -334,7 +341,7 @@ template <>
 		{
 		case is_overload: {
 			auto ptr = reinterpret_cast<overload_map_type*>(value);
-			if (ptr->size() == 1) return ptr->begin()->second;
+			if (ptr->size() == 1) return reinterpret_cast<llvm::Value*>(&ptr->begin()->second);
 			throw err("ambigious reference to overloaded function");
 		}
 		case is_rvalue: {
@@ -427,11 +434,10 @@ template <>
 		{ return nullptr; }
 
 class AST_namespace;
-class AST_struct_context;
 class AST_namespace
 {
 	friend class AST_struct_context;
-	enum mapped_value_type { is_none = 0, is_type, is_alloc, is_overload_func };
+	enum mapped_value_type { is_none = 0, is_type, is_alloc, is_constant, is_overload_func };
 	std::map<std::string, std::pair<void*, mapped_value_type>> name_map;
 	std::map<llvm::StructType*, AST_struct_context*> typed_namespace_map;
 	AST_namespace* parent_namespace = nullptr;
@@ -441,16 +447,16 @@ public:
 	{}
 	virtual ~AST_namespace() = default;
 public:
-	void add_type(llvm::Type* type, const std::string& name);
-	void add_alloc(llvm::Value* alloc, const std::string& name);
-	void add_func(llvm::Function* func, const std::string& name);
+	virtual void add_type(llvm::Type* type, const std::string& name);
+	virtual void add_alloc(llvm::Value* alloc, const std::string& name);
+	virtual void add_constant(llvm::Value* constant, const std::string& name);
+	virtual void add_func(llvm::Function* func, const std::string& name);
 	// get type
 	AST_struct_context* get_namespace(llvm::StructType* p);
 	AST_struct_context* get_namespace(llvm::Value* p);
+	AST_result get_id(const std::string& name, bool precise = false);
 	virtual AST_result get_type(const std::string& name);
 	virtual AST_result get_var(const std::string& name);
-	//AST_result get_func(const std::string& name);
-	virtual AST_result get_id(const std::string& name);
 };
 
 class AST_context;
@@ -472,29 +478,49 @@ public:
 		{ return llvm::BasicBlock::Create(llvm::getGlobalContext(), block_name); }
 };
 
+class AST_method_context;
 class AST_struct_context: public AST_context
 {
 	friend class AST_namespace;
-	llvm::Value* selected = nullptr;
+	friend class AST_method_context;
 	std::vector<llvm::Type*> elems;
 	std::map<std::string, unsigned> idx_lookup;
 public:
+	llvm::Value* selected = nullptr;
 	llvm::StructType* type = nullptr;
 	AST_struct_context(AST_context* p):
 		AST_context(p)
 	{}
 public:
-	AST_result get_var(const std::string& name) override
+	void add_func(llvm::Function* func, const std::string& name) override
 	{
-		if (!selected) throw err("class object not selected");
-		if (auto idx = idx_lookup[name])
+		if (name == "") throw err("cannot define a dummy function");
+		auto ft = func->getFunctionType();
+		std::vector<llvm::Type*> args;
+		for (auto itr = ft->param_begin(); ++itr != ft->param_end();)
+			args.push_back(*itr);
+		ft = llvm::FunctionType::get(ft->getReturnType(), args, false);
+		switch (name_map[name].second)
 		{
-			//std::cerr << idx << std::endl;
-			std::vector<llvm::Value*> idxs = { lBuilder.getInt64(0), lBuilder.getInt32(idx - 1) };
-			return AST_result(llvm::GetElementPtrInst::CreateInBounds(
-				selected, idxs, "PElem", lBuilder.GetInsertBlock()), true);
+		case is_overload_func: {
+			auto map = reinterpret_cast<overload_map_type*>(name_map[name].first);
+			auto& fndata = map->operator[](gen_sig(ft));
+			if (fndata) throw err("redefined function: " + name + " with signature " + type_names[ft]);
+			fndata.ptr = func;
+			fndata.flag = function_meta::is_method;
+			fndata.parent = this; break;
 		}
-		throw err("class has no variable named " + name);
+		default: throw err("name conflicted: " + name);
+		case is_none: {
+			name_map[name].second = is_overload_func;
+			auto map = new overload_map_type;
+			auto& fndata = map->operator[](gen_sig(ft));
+			fndata.ptr = func;
+			fndata.flag = function_meta::is_method;
+			fndata.parent = this;
+			name_map[name].first = map;
+		}
+		}
 	}
 	void alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init) override
 	{
@@ -502,22 +528,24 @@ public:
 		idx_lookup[name] = elems.size();
 		name_map[name].second = is_alloc;
 	}
-	AST_result get_id(const std::string& name) override
-	{
-		switch (name_map[name].second)
-		{
-		case is_type: return get_type(name);
-		case is_alloc: return get_var(name);
-		case is_overload_func: return AST_result();
-		case is_none: throw err("class has no member named " + name);
-		}
-	}
 	void finish_struct(const std::string& name)
 	{
 		type = llvm::StructType::create(elems, name);
 		parent->add_type(type, name);
 		parent->typed_namespace_map[type] = this;
 		type_names[type] = name;
+	}
+protected:
+	AST_result get_var(const std::string& name) override
+	{
+		if (!selected) throw err("class object not selected");
+		if (auto idx = idx_lookup[name])
+		{
+			std::vector<llvm::Value*> idxs = { lBuilder.getInt64(0), lBuilder.getInt32(idx - 1) };
+			return AST_result(llvm::GetElementPtrInst::CreateInBounds(
+				selected, idxs, "PElem", lBuilder.GetInsertBlock()), true);
+		}
+		throw err("class has no variable named " + name);
 	}
 };
 
@@ -645,24 +673,25 @@ public:
 
 class AST_function_context: public AST_local_context
 {
-	llvm::Function* function;
 	llvm::BasicBlock* alloc_block;
 	llvm::BasicBlock* entry_block;
 	llvm::BasicBlock* return_block;
 	llvm::Value* retval;
 protected:
+	llvm::Function* function;
 	llvm::BasicBlock* get_alloc_block() const override
 		{ return alloc_block; }
 	llvm::Function* get_local_function() override
 		{ return function; }
 public:
-	AST_function_context(AST_context* p, llvm::Function* F):
+	AST_function_context(AST_context* p, llvm::Function* F, const std::string& name):
 		AST_local_context(p),
 		function(F),
 		alloc_block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "alloc", F)),
 		entry_block(block),
 		return_block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "return"))
 	{
+		p->add_func(F, name);
 		F->getBasicBlockList().push_back(block);
 		if (F->getReturnType() != void_type)
 		{
@@ -691,13 +720,46 @@ public:
 			make_br(return_block);
 		}
 	}
+	virtual void register_args()
+	{
+		unsigned i = 0;
+		for (auto itr = function->arg_begin(); itr != function->arg_end(); ++itr, ++i)
+		{
+			itr->setName(parent->function_param_name[i]);
+			alloc_var(itr->getType(), parent->function_param_name[i], itr);
+		}
+	}
 };
-/*
+
 class AST_method_context: public AST_function_context
 {
 public:
-	AST_method_context:
-};*/
+	AST_method_context(AST_struct_context* p, llvm::FunctionType* ft, const std::string& name):
+		AST_function_context(p, fn2method(p->type, ft, name), name)
+	{}
+	~AST_method_context() override
+		{ static_cast<AST_struct_context*>(parent)->selected = nullptr; }
+	void register_args() override
+	{
+		unsigned i = 0;
+		add_constant(function->arg_begin(), "this");
+		for (auto itr = function->arg_begin(); ++itr != function->arg_end(); ++i)
+		{
+			itr->setName(parent->function_param_name[i]);
+			alloc_var(itr->getType(), parent->function_param_name[i], itr);
+		}
+		static_cast<AST_struct_context*>(parent)->selected = function->arg_begin();
+	}
+private:
+	static llvm::Function* fn2method(llvm::StructType* st, llvm::FunctionType* ft, const std::string& name)
+	{	
+		std::vector<llvm::Type*> args = { llvm::PointerType::getUnqual(st) };
+		for (auto itr = ft->param_begin(); itr != ft->param_end(); ++itr)
+			args.push_back(*itr);
+		ft = llvm::FunctionType::get(ft->getReturnType(), args, false);
+		return llvm::Function::Create(ft, llvm::Function::ExternalLinkage, type_names[st] + "__" + name, lModule);
+	}
+};
 
 }
 

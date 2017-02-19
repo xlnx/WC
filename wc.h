@@ -613,8 +613,15 @@ parser::expr_init_rules mexpr_rules =
 				func_sig sig;
 				for (auto arg: *params)
 					{ sig.push_back(arg->getType()); }
-				function = (*reinterpret_cast<overload_map_type*>(fdata.first))[sig];
-				if (!function) throw err("none of the overloaded functions matches the given param");
+				auto& fndata = (*reinterpret_cast<overload_map_type*>(fdata.first))[sig];
+				if (!fndata) throw err("none of the overloaded functions matches the given param");
+				switch (fndata.flag)
+				{
+				case function_meta::is_method: 
+					if (!fndata.parent->selected) throw err("no object is selected");
+					params->insert(params->begin(), fndata.parent->selected);
+				case function_meta::is_function: function = fndata.ptr;
+				}
 			}
 			}
 			auto call_inst = lBuilder.CreateCall(function, *params, "Call");
@@ -625,7 +632,7 @@ parser::expr_init_rules mexpr_rules =
 			auto struct_inst = syntax_node[0].code_gen(context).get_as<ltype::wstruct>();
 			auto struct_namespace = context->get_namespace(struct_inst);
 			auto& name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
-			return struct_namespace->get_id(name);
+			return struct_namespace->get_id(name, true);
 		}},
 		{ "% -> %Id", left_asl, [](gen_node& syntax_node, AST_context* context){
 			auto struct_inst = syntax_node[0].code_gen(context).get_as<ltype::pointer>();
@@ -633,7 +640,7 @@ parser::expr_init_rules mexpr_rules =
 				throw err("target isnot struct pointer");
 			auto struct_namespace = context->get_namespace(struct_inst);
 			auto& name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
-			return struct_namespace->get_id(name);
+			return struct_namespace->get_id(name, true);
 		}},
 	},
 };
@@ -970,15 +977,9 @@ parser::init_rules mparse_rules =
 			auto name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
 			if (!type->isFunctionTy()) throw err("not function type");
 			Function* F = Function::Create(static_cast<FunctionType*>(type), Function::ExternalLinkage, name, lModule);
-			context->add_func(F, name);
 			context->collect_param_name = false;
-			AST_function_context new_context(context, F);
-			unsigned i = 0;
-			for (auto itr = F->arg_begin(); itr != F->arg_end(); ++itr, ++i)
-			{
-				itr->setName(context->function_param_name[i]);
-				new_context.alloc_var(itr->getType(), context->function_param_name[i], itr);
-			}
+			AST_function_context new_context(context, F, name);
+			new_context.register_args();
 			syntax_node[2].code_gen(&new_context);
 			return AST_result();
 		}}
@@ -1042,6 +1043,7 @@ parser::init_rules mparse_rules =
 			AST_struct_context* struct_context = new AST_struct_context(context);
 			syntax_node[1].code_gen(struct_context);
 			struct_context->finish_struct(class_name);
+			syntax_node[1].code_gen(struct_context);
 			return AST_result();
 		}},
 	}},
@@ -1051,11 +1053,34 @@ parser::init_rules mparse_rules =
 	}},
 	{ "StructInterfaceItem", {
 		{ "Type Id ;", [](gen_node& syntax_node, AST_context* context){
-			auto type = syntax_node[0].code_gen(context).get_type();
-			auto name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
-			static_cast<AST_struct_context*>(context)->alloc_var(type, name, nullptr);
+			auto struct_context = static_cast<AST_struct_context*>(context);
+			if (!struct_context->type)
+			{
+				auto type = syntax_node[0].code_gen(context).get_type();
+				auto name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
+				struct_context->alloc_var(type, name, nullptr);
+			}
 			return AST_result();
 		}},
+		{ "Method", parser::forward }
+	}},
+	{ "Method", {
+		{ "Type Id { Block }", [](gen_node& syntax_node, AST_context* context){
+			auto struct_context = static_cast<AST_struct_context*>(context);
+			if (struct_context->type)
+			{
+				context->collect_param_name = true;
+				context->function_param_name.resize(0);
+				auto type = syntax_node[0].code_gen(context).get_type();
+				auto name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
+				if (!type->isFunctionTy()) throw err("not function type");
+				context->collect_param_name = false;
+				AST_method_context new_context(struct_context, static_cast<FunctionType*>(type), name);
+				new_context.register_args();
+				syntax_node[2].code_gen(&new_context);
+			}
+			return AST_result();
+		}}
 	}},
 	
 	{ "exprelem", {
