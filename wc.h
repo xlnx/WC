@@ -22,6 +22,7 @@ lexer::init_rules mlex_rules =
 		{ "finally", "finally", {word, no_attr} },
 		{ "for", "for", {word, no_attr} },
 		{ "do", "do", {word, no_attr} },
+		{ "ptr", "ptr", {word, no_attr} },
 		{ "switch", "switch", {word, no_attr} },
 		{ "case", "case", {word, no_attr} },
 		{ "default", "default", {word, no_attr} },
@@ -604,9 +605,20 @@ parser::expr_init_rules mexpr_rules =
 			delete params;
 			return AST_result(call_inst, false);
 		}},
-		/*{
-			"%.%", left_asl
-		},*/
+		{ "% . %Id", left_asl, [](gen_node& syntax_node, AST_context* context){
+			auto struct_inst = syntax_node[0].code_gen(context).get_as<ltype::wstruct>();
+			auto struct_namespace = context->get_namespace(struct_inst);
+			auto& name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
+			return struct_namespace->get_id(name);
+		}},
+		{ "% -> %Id", left_asl, [](gen_node& syntax_node, AST_context* context){
+			auto struct_inst = syntax_node[0].code_gen(context).get_as<ltype::pointer>();
+			if (!static_cast<PointerType*>(struct_inst->getType())->getElementType()->isStructTy())
+				throw err("target isnot struct pointer");
+			auto struct_namespace = context->get_namespace(struct_inst);
+			auto& name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
+			return struct_namespace->get_id(name);
+		}},
 	},
 };
 
@@ -830,65 +842,55 @@ parser::init_rules mparse_rules =
 		}},
 		{ "constexpr", parser::forward }
 	}},
-	{ "TypeExpr", {
-		{ "* TypeExpr", [](gen_node& syntax_node, AST_context* context){
-			auto& base_type_name = type_names[context->current_type];
-			context->current_type = PointerType::getUnqual(context->current_type);
-			type_names[context->current_type] = base_type_name + " ptr";
-			return syntax_node[0].code_gen(context);
+	{ "Type", {
+		{ "ptr Type", [](gen_node& syntax_node, AST_context* context){
+			auto base_type = syntax_node[0].code_gen(context).get_type();
+			auto ret = PointerType::getUnqual(base_type);
+			type_names[ret] = type_names[base_type] + " ptr";
+			return AST_result(ret);
 		}},
-		{ "TypeExpr0", parser::forward }
-	}},
-	{ "TypeExpr0", {
-		{ "TypeExpr0 ( FunctionParams )", [](gen_node& syntax_node, AST_context* context){
-			if (context->current_type->isArrayTy())
+		{ "( FunctionParams ) Type", [](gen_node& syntax_node, AST_context* context){
+			auto base_type = syntax_node[1].code_gen(context).get_type();
+			if (base_type->isArrayTy())
 				throw err("function cannot return an array");
-			if (context->current_type->isFunctionTy())
+			if (base_type->isFunctionTy())
 				throw err("function cannot return a function");
 			
-			auto params = syntax_node[1].code_gen(context).get_data<function_params>();
-			auto& base_type_name = type_names[context->current_type];
-			context->current_type = FunctionType::get(context->current_type, *params, false);	// cannot return an array
-			type_names[context->current_type] = base_type_name + "(";
+			auto params = syntax_node[0].code_gen(context).get_data<function_params>();
+			auto ret = FunctionType::get(base_type, *params, false);	// cannot return an array
+			type_names[ret] = type_names[base_type] + "(";
 			if (params->size())
 			{
-				type_names[context->current_type] += type_names[(*params)[0]];
+				type_names[ret] += type_names[(*params)[0]];
 				for (auto itr = params->begin() + 1; itr != params->end(); ++itr)
-					type_names[context->current_type] += ", " + type_names[*itr];
+					type_names[ret] += ", " + type_names[*itr];
 			}
-			type_names[context->current_type] += ")";
+			type_names[ret] += ")";
 			delete params;
-			return syntax_node[0].code_gen(context);
+			return AST_result(ret);
 		}},
-		{ "TypeExpr0 [ ConstExpr ]", [](gen_node& syntax_node, AST_context* context){
-			if (context->current_type == void_type)
+		{ "[ ConstExpr ] Type", [](gen_node& syntax_node, AST_context* context){
+			auto base_type = syntax_node[1].code_gen(context).get_type();
+			if (base_type == void_type)
 				throw err("cannot create array of void type");
-			if (context->current_type->isFunctionTy())
+			if (base_type->isFunctionTy())
 				throw err("cannot create array of function");
+				
 			auto size = static_cast<ConstantInt*>(create_implicit_cast(
-				syntax_node[1].code_gen(context).get_rvalue(), int_type));
+				syntax_node[0].code_gen(context).get_rvalue(), int_type));
 			if (size->isNegative()) throw err("negative array size");
-			auto& base_type_name = type_names[context->current_type];
 			//auto elem_type = context->current_type;
-			context->current_type = ArrayType::get(context->current_type, size->getZExtValue());
+			auto ret = ArrayType::get(base_type, size->getZExtValue());
 			// record typename
-			type_names[context->current_type] = base_type_name + "[" + [](int x)->string
+			type_names[ret] = type_names[base_type] + "[" + [](int x)->string
 			{
 				char s[20];	sprintf(s, "%d", x); return s;
 			}(size->getZExtValue()) + "]";
-			return syntax_node[0].code_gen(context);
+			return AST_result(ret);
 		}},
-		{ "Id", [](gen_node& syntax_node, AST_context* context){
-			context->current_name = static_cast<term_node&>(syntax_node[0]).data.attr->value;
-			return AST_result();
-		}},
-		{ "( TypeExpr )", parser::forward },
-		{ "", [](gen_node& syntax_node, AST_context* context){
-			context->current_name = "";
-			return AST_result();
-		}}		// dummy
+		{ "TypeElem", parser::forward }		// dummy
 	}},
-	{ "Type", {
+	{ "TypeElem", {
 		{ "void", parser::forward },
 		{ "int", parser::forward },
 		{ "float", parser::forward },
@@ -898,7 +900,6 @@ parser::init_rules mparse_rules =
 			return context->get_type(static_cast<term_node&>(syntax_node[0]).data.attr->value);
 		}}
 	}},
-	
 	// Function
 	{ "FunctionParams", {
 		{ "FunctionParamList", [](gen_node& syntax_node, AST_context* context){
@@ -924,33 +925,25 @@ parser::init_rules mparse_rules =
 		}},
 	}},
 	{ "FunctionParam", {
-		{ "Type TypeExpr", [](gen_node& syntax_node, AST_context* context){
-			auto bak_type = context->current_type;
-			auto bak_name = context->current_name;
+		{ "Type Id", [](gen_node& syntax_node, AST_context* context){
 			auto bak_collect = context->collect_param_name;
-			
 			context->collect_param_name = false;
-			context->current_type = syntax_node[0].code_gen(context).get_type();
-			syntax_node[1].code_gen(context);
 			
-			auto param = context->current_type;
+			auto type = syntax_node[0].code_gen(context);			
 			if (context->collect_param_name = bak_collect)
-				context->function_param_name.push_back(context->current_name);
-			context->current_type = bak_type;
-			context->current_name = bak_name;
-			return AST_result(param);
+				context->function_param_name.push_back(static_cast<term_node&>(syntax_node[1]).data.attr->value);
+			return AST_result(type);
 		}}
 	}},
 	{ "Function", {
-		{ "Type TypeExpr { Block }", [](gen_node& syntax_node, AST_context* context){
+		{ "Type Id { Block }", [](gen_node& syntax_node, AST_context* context){
 			context->collect_param_name = true;
 			context->function_param_name.resize(0);
-			context->current_type = syntax_node[0].code_gen(context).get_type();
-			syntax_node[1].code_gen(context);
-			if (!context->current_type->isFunctionTy()) throw err("not function type");
-			Function* F = Function::Create(static_cast<FunctionType*>(context->current_type),
-				Function::ExternalLinkage, context->current_name, lModule);
-			context->add_func(F, context->current_name);
+			auto type = syntax_node[0].code_gen(context).get_type();
+			auto name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
+			if (!type->isFunctionTy()) throw err("not function type");
+			Function* F = Function::Create(static_cast<FunctionType*>(type), Function::ExternalLinkage, name, lModule);
+			context->add_func(F, name);
 			context->collect_param_name = false;
 			AST_function_context new_context(context, F);
 			unsigned i = 0;
@@ -966,52 +959,28 @@ parser::init_rules mparse_rules =
 	
 	// Defination
 	{ "TypeDefine", {
-		{ "CStyleTypeDefine", parser::forward },
-		{ "CppStyleTypeDefine", parser::forward }
-	}},
-	{ "CStyleTypeDefine", {
-		{ "CStyleTypeDefine, TypeExpr", [](gen_node& syntax_node, AST_context* context){
-			auto base_type = context->current_type = syntax_node[0].code_gen(context).get_type();
-			syntax_node[1].code_gen(context);
-			context->add_type(context->current_type, context->current_name);
-			return AST_result(base_type);
-		}},
-		{ "typedef Type TypeExpr", [](gen_node& syntax_node, AST_context* context){
-			auto base_type = context->current_type = syntax_node[0].code_gen(context).get_type();
-			syntax_node[1].code_gen(context);
-			context->add_type(context->current_type, context->current_name);
-			return AST_result(base_type);
-		}}
-	}},
-	{ "CppStyleTypeDefine", {
-		{ "typedef Id = Type TypeExpr", [](gen_node& syntax_node, AST_context* context){
-			auto base_type = context->current_type = syntax_node[1].code_gen(context).get_type();
-			syntax_node[2].code_gen(context);
-			if (context->current_name != "") throw err("type expression not dummy");
-			context->add_type(context->current_type, static_cast<term_node&>(syntax_node[0]).data.attr->value);
+		{ "typedef Id = Type", [](gen_node& syntax_node, AST_context* context){
+			auto type = syntax_node[1].code_gen(context).get_type();
+			context->add_type(type, static_cast<term_node&>(syntax_node[0]).data.attr->value);
 			return AST_result();
 		}}
 	}},
 	{ "GlobalVarDefine", {
-		{ "GlobalVarDefine, TypeExpr GlobalInitExpr", [](gen_node& syntax_node, AST_context* context){
-			Type* base_type = syntax_node[0].code_gen(context).get_type();
-			context->current_type = base_type;
-			syntax_node[1].code_gen(context);
+		{ "GlobalVarDefine, Id GlobalInitExpr", [](gen_node& syntax_node, AST_context* context){
+			Type* type = syntax_node[0].code_gen(context).get_type();
 			auto init_expr = syntax_node[2].code_gen(context);
 			Constant* init = static_cast<Constant*>(init_expr.flag != AST_result::is_none ?
 				init_expr.get_rvalue() : nullptr);		// init this value implicitly by default
-			context->alloc_var(context->current_type, context->current_name, init);
-			return AST_result(base_type);
+			context->alloc_var(type, static_cast<term_node&>(syntax_node[1]).data.attr->value, init);
+			return AST_result(type);
 		}},
-		{ "Type TypeExpr GlobalInitExpr", [](gen_node& syntax_node, AST_context* context){
-			Type* base_type = syntax_node[0].code_gen(context).get_type();
-			context->current_type = base_type;
-			syntax_node[1].code_gen(context);
+		{ "Type Id GlobalInitExpr", [](gen_node& syntax_node, AST_context* context){
+			Type* type = syntax_node[0].code_gen(context).get_type();
 			auto init_expr = syntax_node[2].code_gen(context);
 			Constant* init = static_cast<Constant*>(init_expr.flag != AST_result::is_none ?
 				init_expr.get_rvalue() : nullptr);		// init this value implicitly by default
-			context->alloc_var(context->current_type, context->current_name, init);
-			return AST_result(base_type);
+			context->alloc_var(type, static_cast<term_node&>(syntax_node[1]).data.attr->value, init);
+			return AST_result(type);
 		}}
 	}},
 	{ "GlobalInitExpr", {
@@ -1019,23 +988,19 @@ parser::init_rules mparse_rules =
 		{ "", parser::empty }
 	}},
 	{ "LocalVarDefine", {
-		{ "LocalVarDefine, TypeExpr InitExpr", [](gen_node& syntax_node, AST_context* context){
-			Type* base_type = syntax_node[0].code_gen(context).get_type();
-			context->current_type = base_type;
-			syntax_node[1].code_gen(context);
+		{ "LocalVarDefine, Id InitExpr", [](gen_node& syntax_node, AST_context* context){
+			Type* type = syntax_node[0].code_gen(context).get_type();
 			auto init_expr = syntax_node[2].code_gen(context);
 			auto init = init_expr.flag != AST_result::is_none ? init_expr.get_rvalue() : nullptr;		// no init
-			context->alloc_var(context->current_type, context->current_name, init);
-			return AST_result(base_type);
+			context->alloc_var(type, static_cast<term_node&>(syntax_node[1]).data.attr->value, init);
+			return AST_result(type);
 		}},
-		{ "Type TypeExpr InitExpr", [](gen_node& syntax_node, AST_context* context){
-			Type* base_type = syntax_node[0].code_gen(context).get_type();
-			context->current_type = base_type;
-			syntax_node[1].code_gen(context);
+		{ "Type Id InitExpr", [](gen_node& syntax_node, AST_context* context){
+			Type* type = syntax_node[0].code_gen(context).get_type();
 			auto init_expr = syntax_node[2].code_gen(context);
 			auto init = init_expr.flag != AST_result::is_none ? init_expr.get_rvalue() : nullptr;		// no init
-			context->alloc_var(context->current_type, context->current_name, init);
-			return AST_result(base_type);
+			context->alloc_var(type, static_cast<term_node&>(syntax_node[1]).data.attr->value, init);
+			return AST_result(type);
 		}}
 	}},
 	{ "InitExpr", {
@@ -1047,30 +1012,22 @@ parser::init_rules mparse_rules =
 	{ "StructDefine", {
 		{ "struct Id { StructInterface }", [](gen_node& syntax_node, AST_context* context){
 			auto& class_name =  static_cast<term_node&>(syntax_node[0]).data.attr->value;
-			auto elems = syntax_node[1].code_gen(context).get_data<vector<Type*>>();
-			auto class_type = StructType::create(*elems, class_name);
-			context->add_type(class_type, class_name);
-			/*for (auto itr = class_type->element_begin(); itr != class_type->element_end(); ++itr)
-			{
-				cout << (*itr)->getTypeID() << endl;
-			}*/
-			type_names[class_type] = class_name;
-			delete elems;
+			AST_struct_context* struct_context = new AST_struct_context(context);
+			syntax_node[1].code_gen(struct_context);
+			struct_context->finish_struct(class_name);
 			return AST_result();
 		}},
 	}},
 	{ "StructInterface", {
-		{ "StructInterface StructInterfaceItem", [](gen_node& syntax_node, AST_context* context){
-			auto elems = syntax_node[0].code_gen(context).get_data<vector<Type*>>();
-			elems->push_back(syntax_node[1].code_gen(context).get_type());
-			return AST_result(elems);
-		}},
-		{ "", [](gen_node& syntax_node, AST_context* context){ return AST_result(new vector<Type*>); } }
+		{ "StructInterfaceItem StructInterface", parser::expand },
+		{ "", parser::empty }
 	}},
 	{ "StructInterfaceItem", {
 		{ "Type Id ;", [](gen_node& syntax_node, AST_context* context){
 			auto type = syntax_node[0].code_gen(context).get_type();
-			return AST_result(type);
+			auto name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
+			static_cast<AST_struct_context*>(context)->alloc_var(type, name, nullptr);
+			return AST_result();
 		}},
 	}},
 	

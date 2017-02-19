@@ -1,6 +1,16 @@
-int sum(int a, int b)
+struct A
+{
+	int a;
+	float b;
+};
+
+(int a, int b)int sum
 {
 	int result = 0;
+	A a_inst;
+	ptr A pa;
+	a_inst.a = 1.1;
+	pa->b = 'a';
 	while (a <= b)
 	{	
 		result += a;
@@ -14,7 +24,7 @@ int sum(int a, int b)
 	return result;
 }
 
-int swh(int a, int b)
+(int a, int b)int swh
 {
 	switch (a)
 	{
@@ -32,8 +42,13 @@ int swh(int a, int b)
 	return -a | b;
 }
 
-int fib(int x)
+(int x)int fib
 {
 	if (x < 3) return 1;
 	else return fib(x - 1) + fib(x - 2);
+}
+
+(ptr(int L, int R)int f, int L, int R)int calc
+{
+	
 }

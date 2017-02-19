@@ -180,7 +180,7 @@ llvm::Value* create_implicit_cast(llvm::Value* value, llvm::Type* type);
 llvm::Type* get_binary_sync_type(llvm::Value* LHS, llvm::Value* RHS);
 llvm::Type* binary_sync_cast(llvm::Value*& LHS, llvm::Value*& RHS, llvm::Type* type = nullptr);
 
-enum ltype { integer, floating_point, function, array, pointer };
+enum ltype { integer, floating_point, function, array, pointer, wstruct };
 
 using overload_map_type = std::map<llvm::Type*, void*>;
 
@@ -383,10 +383,27 @@ template <>
 template <>
 	llvm::Value* AST_result::get_casted<ltype::floating_point>() const
 		{ return nullptr; }
+		
+template <>
+	llvm::Value* AST_result::get<ltype::wstruct>() const
+	{
+		auto ptr = reinterpret_cast<llvm::Value*>(value);
+		switch (flag)
+		{	// cast lvalue to rvalue
+		case is_lvalue: if (static_cast<llvm::AllocaInst*>(ptr)->getAllocatedType()->isStructTy())
+			return ptr; break;
+		}
+		return nullptr;
+	}
+template <>
+	llvm::Value* AST_result::get_casted<ltype::wstruct>() const
+		{ return nullptr; }
 
 class AST_namespace;
+class AST_struct_context;
 class AST_namespace
 {
+	friend class AST_struct_context;
 	struct data_type
 	{
 		void* ptr = nullptr;
@@ -394,6 +411,7 @@ class AST_namespace
 	};
 	enum mapped_value_type { is_none = 0, is_type, is_alloc, is_overload_func };
 	std::map<std::string, std::pair<data_type, mapped_value_type>> name_map;
+	std::map<llvm::StructType*, AST_struct_context*> typed_namespace_map;
 	AST_namespace* parent_namespace = nullptr;
 public:
 	AST_namespace(AST_namespace* p):
@@ -405,10 +423,12 @@ public:
 	void add_alloc(llvm::Value* alloc, const std::string& name);
 	void add_func(llvm::Function* func, const std::string& name);
 	// get type
-	AST_result get_type(const std::string& name);
-	AST_result get_var(const std::string& name);
+	AST_struct_context* get_namespace(llvm::StructType* p);
+	AST_struct_context* get_namespace(llvm::Value* p);
+	virtual AST_result get_type(const std::string& name);
+	virtual AST_result get_var(const std::string& name);
 	//AST_result get_func(const std::string& name);
-	AST_result get_id(const std::string& name);
+	virtual AST_result get_id(const std::string& name);
 };
 
 class AST_context;
@@ -417,19 +437,66 @@ class AST_context: public AST_namespace
 protected:
 	AST_context* parent;
 public:
-	llvm::Type* current_type = nullptr;
-	std::string current_name;
 	bool collect_param_name = false;
 	std::vector<std::string> function_param_name;
+public:
 	AST_context(AST_context* p):
 		AST_namespace(p),
 		parent(p)
 	{}
 public:
 	virtual void alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init) = 0;
-public:
 	static llvm::BasicBlock* new_block(const std::string& block_name)
 		{ return llvm::BasicBlock::Create(llvm::getGlobalContext(), block_name); }
+};
+
+class AST_struct_context: public AST_context
+{
+	friend class AST_namespace;
+	llvm::Value* selected = nullptr;
+	std::vector<llvm::Type*> elems;
+	std::map<std::string, unsigned> idx_lookup;
+public:
+	llvm::StructType* type = nullptr;
+	AST_struct_context(AST_context* p):
+		AST_context(p)
+	{}
+public:
+	AST_result get_var(const std::string& name) override
+	{
+		if (!selected) throw err("class object not selected");
+		if (auto idx = idx_lookup[name])
+		{
+			//std::cerr << idx << std::endl;
+			std::vector<llvm::Value*> idxs = { lBuilder.getInt64(0), lBuilder.getInt32(idx - 1) };
+			return AST_result(llvm::GetElementPtrInst::CreateInBounds(
+				selected, idxs, "PElem", lBuilder.GetInsertBlock()), true);
+		}
+		throw err("class has no variable named " + name);
+	}
+	void alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init) override
+	{
+		elems.push_back(type);
+		idx_lookup[name] = elems.size();
+		name_map[name].second = is_alloc;
+	}
+	AST_result get_id(const std::string& name) override
+	{
+		switch (name_map[name].second)
+		{
+		case is_type: return get_type(name);
+		case is_alloc: return get_var(name);
+		case is_overload_func: return AST_result();
+		case is_none: throw err("class has no member named " + name);
+		}
+	}
+	void finish_struct(const std::string& name)
+	{
+		type = llvm::StructType::create(elems, name);
+		parent->add_type(type, name);
+		parent->typed_namespace_map[type] = this;
+		type_names[type] = name;
+	}
 };
 
 class AST_global_context: public AST_context

@@ -73,6 +73,9 @@ llvm::Value* AST_result::get_rvalue() const
 	return get_any_among<ltype::integer, ltype::floating_point, ltype::pointer, ltype::function>(); 
 }
 
+
+
+
 // AST_namespace
 void AST_namespace::add_type(llvm::Type* type, const std::string& name)
 {
@@ -95,6 +98,7 @@ void AST_namespace::add_alloc(llvm::Value* alloc, const std::string& name)
 	case is_none: name_map[name].second = is_alloc; name_map[name].first.ptr = alloc; alloc->setName(name); 
 	}
 }
+
 void AST_namespace::add_func(llvm::Function* func, const std::string& name)
 {
 	if (name == "") throw err("cannot define a dummy function");
@@ -108,6 +112,38 @@ void AST_namespace::add_func(llvm::Function* func, const std::string& name)
 	default: throw err("name conflicted: " + name);
 	case is_none: name_map[name].second = is_overload_func;
 		name_map[name].first.ptr = func;//overload_map[type] = func;
+	}
+}
+
+AST_struct_context* AST_namespace::get_namespace(llvm::StructType* p)
+{
+	if (!p->isStructTy()) throw err("target not struct type");
+	if (auto ptr = typed_namespace_map[p])
+	{
+		ptr->selected = nullptr;
+		return ptr;
+	}
+	else
+	{
+		if (!parent_namespace) throw err("target type not found in this namespace");
+		return parent_namespace->get_namespace(p);
+	}
+}
+
+AST_struct_context* AST_namespace::get_namespace(llvm::Value* p)
+{
+	if (!p->getType()->isPointerTy() && !static_cast<llvm::PointerType*>(p->getType())->
+		getElementType()->isStructTy()) throw err("target not struct type");
+	if (auto ptr = typed_namespace_map[static_cast<llvm::StructType*>(
+		static_cast<llvm::PointerType*>(p->getType())->getElementType())])
+	{
+		ptr->selected = p;
+		return ptr;
+	}
+	else
+	{
+		if (!parent_namespace) throw err("target type not found in this namespace");
+		return parent_namespace->get_namespace(p);
 	}
 }
 
