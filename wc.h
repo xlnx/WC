@@ -595,9 +595,9 @@ parser::expr_init_rules mexpr_rules =
 			return AST_result(GetElementPtrInst::CreateInBounds(data.first, idx, "PElem",
 				static_cast<AST_local_context*>(context)->get_block()), true);
 		}},
-		{ "% ( %$ )", left_asl, [](gen_node& syntax_node, AST_context* context){	
-			auto fdata = syntax_node[0].code_gen(context).get_among<ltype::overload, ltype::function>();
+		{ "% ( %$ )", left_asl, [](gen_node& syntax_node, AST_context* context){
 			auto params = syntax_node[1].code_gen(context).get_data<std::vector<Value*>>();
+			auto fdata = syntax_node[0].code_gen(context).get_among<ltype::overload, ltype::function>();
 			llvm::Function* function = nullptr;
 			switch (fdata.second)
 			{
@@ -611,22 +611,26 @@ parser::expr_init_rules mexpr_rules =
 			}
 			case 0: {
 				func_sig sig;
-				for (auto arg: *params)
-					{ sig.push_back(arg->getType()); }
-				auto& fndata = (*reinterpret_cast<overload_map_type*>(fdata.first))[sig];
+				for (auto arg: *params) sig.push_back(arg->getType());
+				auto map = reinterpret_cast<overload_map_type*>(fdata.first);
+				auto& fndata = (*map)[sig];
 				if (!fndata) throw err("none of the overloaded functions matches the given param");
 				switch (fndata.flag)
 				{
 				case function_meta::is_method: 
-					if (!fndata.parent->selected) throw err("no object is selected");
-					params->insert(params->begin(), fndata.parent->selected);
+					if (!fndata.object) throw err("no object is selected");
+					params->insert(params->begin(), fndata.object);
+					fndata.object = nullptr;
 				case function_meta::is_function: function = fndata.ptr;
 				}
+				for (auto& f: *map) f.second.object = nullptr;
 			}
 			}
-			auto call_inst = lBuilder.CreateCall(function, *params, "Call");
+			auto call_inst = function->getReturnType() != void_type ? lBuilder.CreateCall(function, *params, "Call")
+				: lBuilder.CreateCall(function, *params);
 			delete params;
-			return AST_result(call_inst, false);
+			if (function->getReturnType() != void_type) return AST_result(call_inst, false);
+				else return AST_result();
 		}},
 		{ "% . %Id", left_asl, [](gen_node& syntax_node, AST_context* context){
 			auto struct_inst = syntax_node[0].code_gen(context).get_as<ltype::wstruct>();
@@ -1041,14 +1045,34 @@ parser::init_rules mparse_rules =
 	
 	// Struct
 	{ "StructDefine", {
-		{ "class Id { StructInterface }", [](gen_node& syntax_node, AST_context* context){
+		{ "class Id StructBase { StructInterface }", [](gen_node& syntax_node, AST_context* context){
 			auto& class_name =  static_cast<term_node&>(syntax_node[0]).data.attr->value;
-			AST_struct_context* struct_context = new AST_struct_context(context);
-			syntax_node[1].code_gen(struct_context);
-			struct_context->finish_struct(class_name);
-			syntax_node[1].code_gen(struct_context);
+			auto base_val = syntax_node[1].code_gen(context);
+			if (!base_val)
+			{
+				AST_struct_context* struct_context = new AST_struct_context(context);
+				syntax_node[2].code_gen(struct_context);
+				struct_context->finish_struct(class_name);
+				syntax_node[2].code_gen(struct_context);
+			}
+			else
+			{
+				AST_struct_context* struct_context = new AST_struct_context(context,
+					context->get_namespace(static_cast<StructType*>(base_val.get_type())));
+				syntax_node[2].code_gen(struct_context);
+				struct_context->finish_struct(class_name);
+				syntax_node[2].code_gen(struct_context);
+			}
 			return AST_result();
 		}},
+	}},
+	{ "StructBase", {
+		{ ": Id", [](gen_node& syntax_node, AST_context* context){
+			auto base = syntax_node[0].code_gen(context).get_type();
+			if (!base->isStructTy()) throw err("class base declared non-class type");
+			return AST_result(base);
+		}},
+		{ "", parser::empty }
 	}},
 	{ "StructInterface", {
 		{ "StructInterfaceItem StructInterface", parser::expand },

@@ -183,12 +183,11 @@ llvm::Type* get_binary_sync_type(llvm::Value* LHS, llvm::Value* RHS);
 llvm::Type* binary_sync_cast(llvm::Value*& LHS, llvm::Value*& RHS, llvm::Type* type = nullptr);
 
 enum ltype { integer, floating_point, function, array, pointer, wstruct, overload, void_pointer };
-class AST_struct_context;
 struct function_meta
 {
 	llvm::Function* ptr = nullptr;
 	enum { is_function, is_method } flag;
-	AST_struct_context* parent = nullptr;
+	llvm::Value* object = nullptr;
 	explicit operator bool () const { return ptr; }
 };
 using func_sig = std::vector<llvm::Type*>;
@@ -214,6 +213,7 @@ public:
 	using type_map_type = std::map<result_type, std::string>;
 	static type_map_type type_map;
 	result_type flag = is_none;
+	explicit operator bool () const { return flag; }
 public:
 	explicit AST_result() = default;
 	explicit AST_result(llvm::Type* p):
@@ -471,6 +471,7 @@ template <>
 		{ return nullptr; }
 
 class AST_namespace;
+class AST_struct_context;
 class AST_namespace
 {
 	friend class AST_struct_context;
@@ -487,11 +488,11 @@ public:
 	void add_type(llvm::Type* type, const std::string& name);
 	void add_alloc(llvm::Value* alloc, const std::string& name);
 	void add_constant(llvm::Value* constant, const std::string& name);
-	void add_func(llvm::Function* func, const std::string& name, function_attr* fnattr = nullptr);
+	virtual void add_func(llvm::Function* func, const std::string& name, function_attr* fnattr = nullptr);
 	// get type
 	AST_struct_context* get_namespace(llvm::StructType* p);
 	AST_struct_context* get_namespace(llvm::Value* p);
-	AST_result get_id(const std::string& name, bool precise = false);
+	virtual AST_result get_id(const std::string& name, bool precise = false);
 	virtual AST_result get_type(const std::string& name);
 	virtual AST_result get_var(const std::string& name);
 };
@@ -515,6 +516,7 @@ public:
 		{ return llvm::BasicBlock::Create(llvm::getGlobalContext(), block_name); }
 };
 
+class AST_struct_context;
 class AST_struct_context: public AST_context
 {
 	std::vector<llvm::Type*> elems;
@@ -527,8 +529,10 @@ public:
 	unsigned has_vbptr = 0;
 	llvm::Value* selected = nullptr;
 	llvm::StructType* type = nullptr;
-	AST_struct_context(AST_context* p):
-		AST_context(p)
+	AST_struct_context* base = nullptr;
+	AST_struct_context(AST_context* p, AST_struct_context* b = nullptr):
+		AST_context(p),
+		base(b)
 	{}
 public:
 	void alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init) override
@@ -539,10 +543,42 @@ public:
 	}
 	void finish_struct(const std::string& name)
 	{
+		if (base)
+		{
+			elems.insert(elems.begin(), base->type);
+			for (auto& v: idx_lookup) ++v.second;
+		}
 		type = llvm::StructType::create(elems, name);
 		parent->add_type(type, name);
 		parent->typed_namespace_map[type] = this;
 		type_names[type] = name;
+	}
+	AST_result get_id(const std::string& name, bool precise = false) override
+	{
+		switch (name_map[name].second)
+		{
+		case is_type: return get_type(name);
+		case is_alloc: return get_var(name);
+		case is_overload_func: {
+			auto map = reinterpret_cast<overload_map_type*>(name_map[name].first);
+			for (auto& f: *map) f.second.object = selected;
+			selected = nullptr;
+			return AST_result(map);
+		}
+		case is_constant: return AST_result(reinterpret_cast<llvm::Value*>(name_map[name].first), false);
+		case is_none: if (base){
+				auto sel_back = base->selected;
+				std::vector<llvm::Value*> idxs = { lBuilder.getInt64(0), lBuilder.getInt32(0) };
+				base->selected = selected ? llvm::GetElementPtrInst::CreateInBounds(
+					selected, idxs, "PBase", lBuilder.GetInsertBlock()) : nullptr;
+				auto res = base->get_id(name);
+				base->selected = sel_back;
+				selected = nullptr;
+				return res;
+			}
+			if (parent_namespace && !precise) return parent_namespace->get_id(name);
+			else throw err("undefined identifier " + name + " in this namespace");
+		}
 	}
 protected:
 	AST_result get_var(const std::string& name) override
@@ -570,8 +606,6 @@ public:
 	{}
 	void alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init = nullptr) override
 	{
-		if (type == void_type)
-			throw err("cannot create variable of void type");
 		if (name == "")
 			throw err("cannot alloc a dummy variable");
 		if (init)
@@ -621,8 +655,6 @@ public:
 		{ static_cast<AST_local_context*>(parent)->make_return(ret); }
 	void alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init) override
 	{
-		if (type == void_type)
-			throw err("cannot create variable of void type");
 		if (name == "")
 			throw err("cannot alloc a dummy variable");
 		if (init)

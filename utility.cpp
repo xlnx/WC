@@ -118,6 +118,13 @@ void AST_namespace::add_func(llvm::Function* func, const std::string& name, func
 {
 	if (name == "") throw err("cannot define a dummy function");
 	auto type = func->getFunctionType();
+	if (fnattr && fnattr->count(is_method))
+	{
+		std::vector<llvm::Type*> args;
+		for (auto itr = type->param_begin(); ++itr != type->param_end();)
+			args.push_back(*itr);
+		type = llvm::FunctionType::get(type->getReturnType(), args, false);
+	}
 	switch (name_map[name].second)
 	{
 	case is_overload_func: {
@@ -128,7 +135,7 @@ void AST_namespace::add_func(llvm::Function* func, const std::string& name, func
 		if (fnattr && fnattr->count(is_method))
 		{
 			fndata.flag = function_meta::is_method;
-			fndata.parent = static_cast<AST_struct_context*>(this);
+			//fndata.object = static_cast<AST_struct_context*>(this)->selected;
 		}
 		else fndata.flag = function_meta::is_function; break;
 	}
@@ -141,7 +148,7 @@ void AST_namespace::add_func(llvm::Function* func, const std::string& name, func
 		if (fnattr && fnattr->count(is_method))
 		{
 			fndata.flag = function_meta::is_method;
-			fndata.parent = static_cast<AST_struct_context*>(this);
+			//fndata.parent = static_cast<AST_struct_context*>(this);
 		}
 		else fndata.flag = function_meta::is_function;
 		name_map[name].first = map;
