@@ -24,7 +24,11 @@ llvm::Value* create_implicit_cast(llvm::Value* value, llvm::Type* type)
 		AST_result res(value, false);
 		if (type == int_type || type == char_type || type == bool_type) return res.cast_to<ltype::integer>(type);
 		if (type == float_type) return res.cast_to<ltype::floating_point>(type);
-		if (type->isPointerTy()) return res.cast_to<ltype::pointer>(type);
+		if (type->isPointerTy())
+		{
+			if (type == void_ptr_type) return res.cast_to<ltype::void_pointer>(type);
+			return res.cast_to<ltype::pointer>(type);
+		}
 		if (type->isFunctionTy()) return res.cast_to<ltype::function>(type);
 		if (type->isArrayTy()) return res.cast_to<ltype::array>(type);
 		throw err("unexpected typename in casting");
@@ -110,7 +114,7 @@ void AST_namespace::add_constant(llvm::Value* constant, const std::string& name)
 	}
 }
 
-void AST_namespace::add_func(llvm::Function* func, const std::string& name)
+void AST_namespace::add_func(llvm::Function* func, const std::string& name, function_attr* fnattr)
 {
 	if (name == "") throw err("cannot define a dummy function");
 	auto type = func->getFunctionType();
@@ -121,7 +125,12 @@ void AST_namespace::add_func(llvm::Function* func, const std::string& name)
 		auto& fndata = map->operator[](gen_sig(type));
 		if (fndata) throw err("redefined function: " + name + " with signature " + type_names[type]);
 		fndata.ptr = func;
-		fndata.flag = function_meta::is_function; break;
+		if (fnattr && fnattr->count(is_method))
+		{
+			fndata.flag = function_meta::is_method;
+			fndata.parent = static_cast<AST_struct_context*>(this);
+		}
+		else fndata.flag = function_meta::is_function; break;
 	}
 	default: throw err("name conflicted: " + name);
 	case is_none: {
@@ -129,7 +138,12 @@ void AST_namespace::add_func(llvm::Function* func, const std::string& name)
 		auto map = new overload_map_type;
 		auto& fndata = map->operator[](gen_sig(type));
 		fndata.ptr = func;
-		fndata.flag = function_meta::is_function;
+		if (fnattr && fnattr->count(is_method))
+		{
+			fndata.flag = function_meta::is_method;
+			fndata.parent = static_cast<AST_struct_context*>(this);
+		}
+		else fndata.flag = function_meta::is_function;
 		name_map[name].first = map;
 	}
 	}

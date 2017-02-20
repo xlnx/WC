@@ -68,6 +68,9 @@ public:
 	static const handler forward;
 	static const handler empty;
 	static const handler expand;
+	template <unsigned attr>
+	static AST_result attribute(gen_node&, AST_context*)
+		{ return AST_result(attr); }
 };
 
 struct oper_node
@@ -93,6 +96,7 @@ struct gen_node: AST
 		return func(*this, context);
 	}
 };
+
 const parser::handler parser::forward = [](gen_node& T, AST_context* context)->AST_result
 	{ return T.sub.empty() ? AST_result() : T[0].code_gen(context); };
 const parser::handler parser::empty = [](gen_node&, AST_context*)->AST_result{ return AST_result(); };

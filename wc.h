@@ -10,7 +10,6 @@ using namespace lr_parser;
 lexer::init_rules mlex_rules =
 {
 	{	// type
-		{ "void", "void", {word} },
 		{ "int", "int", {word} },
 		{ "float", "float", {word} },
 		{ "char", "char", {word} },
@@ -23,8 +22,10 @@ lexer::init_rules mlex_rules =
 		{ "for", "for", {word, no_attr} },
 		{ "do", "do", {word, no_attr} },
 		{ "ptr", "ptr", {word, no_attr} },
+		{ "pointer", "pointer", {word, no_attr} },
 		{ "fn", "fn", {word, no_attr} },
 		{ "arr", "arr", {word, no_attr} },
+		{ "virtual", "virtual", {word, no_attr} },
 		{ "switch", "switch", {word, no_attr} },
 		{ "case", "case", {word, no_attr} },
 		{ "default", "default", {word, no_attr} },
@@ -32,7 +33,7 @@ lexer::init_rules mlex_rules =
 		{ "false", "false", {word} },
 		//
 		{ "typedef", "typedef", {word, no_attr} },
-		{ "struct", "struct", {word, no_attr} },
+		{ "class", "class", {word, no_attr} },
 		//
 		{ "return", "return", {word} },
 		{ "break", "break", {word} },
@@ -119,7 +120,6 @@ lexer::init_rules mlex_rules =
 		{ "float", [](term_node&, AST_context*){ return AST_result(float_type); } },
 		{ "char", [](term_node&, AST_context*){ return AST_result(char_type); } },
 		{ "bool", [](term_node&, AST_context*){ return AST_result(bool_type); } },
-		{ "void", [](term_node&, AST_context*){ return AST_result(void_type); } },
 		{ "true", [](term_node&, AST_context*){ return AST_result(ConstantInt::get(bool_type, 1), false); } },
 		{ "false", [](term_node&, AST_context*){ return AST_result(ConstantInt::get(bool_type, 0), false); } }
 	}
@@ -866,13 +866,16 @@ parser::init_rules mparse_rules =
 		{ "constexpr", parser::forward }
 	}},
 	{ "Type", {
+		{ "pointer", [](gen_node& syntax_node, AST_context* context){
+			return AST_result(void_ptr_type);
+		}},
 		{ "ptr Type", [](gen_node& syntax_node, AST_context* context){
 			auto base_type = syntax_node[0].code_gen(context).get_type();
 			auto ret = PointerType::getUnqual(base_type);
 			type_names[ret] = type_names[base_type] + " ptr";
 			return AST_result(ret);
 		}},
-		{ "fn ( FunctionParams ) -> Type", [](gen_node& syntax_node, AST_context* context){
+		{ "fn ( FunctionParams ) FunctionRetType", [](gen_node& syntax_node, AST_context* context){
 			auto base_type = syntax_node[1].code_gen(context).get_type();
 			if (base_type->isArrayTy())
 				throw err("function cannot return an array");
@@ -894,8 +897,6 @@ parser::init_rules mparse_rules =
 		}},
 		{ "arr ConstExpr Type", [](gen_node& syntax_node, AST_context* context){
 			auto base_type = syntax_node[1].code_gen(context).get_type();
-			if (base_type == void_type)
-				throw err("cannot create array of void type");
 			if (base_type->isFunctionTy())
 				throw err("cannot create array of function");
 				
@@ -913,8 +914,11 @@ parser::init_rules mparse_rules =
 		}},
 		{ "TypeElem", parser::forward }		// dummy
 	}},
+	{ "FunctionRetType", {
+		{ "-> Type", parser::forward },
+		{ "", [](gen_node&, AST_context*){ return AST_result(void_type); } }
+	}},
 	{ "TypeElem", {
-		{ "void", parser::forward },
 		{ "int", parser::forward },
 		{ "float", parser::forward },
 		{ "char", parser::forward },
@@ -977,7 +981,6 @@ parser::init_rules mparse_rules =
 			auto name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
 			if (!type->isFunctionTy()) throw err("not function type");
 			Function* F = Function::Create(static_cast<FunctionType*>(type), Function::ExternalLinkage, name, lModule);
-			context->collect_param_name = false;
 			AST_function_context new_context(context, F, name);
 			new_context.register_args();
 			syntax_node[2].code_gen(&new_context);
@@ -1038,7 +1041,7 @@ parser::init_rules mparse_rules =
 	
 	// Struct
 	{ "StructDefine", {
-		{ "struct Id { StructInterface }", [](gen_node& syntax_node, AST_context* context){
+		{ "class Id { StructInterface }", [](gen_node& syntax_node, AST_context* context){
 			auto& class_name =  static_cast<term_node&>(syntax_node[0]).data.attr->value;
 			AST_struct_context* struct_context = new AST_struct_context(context);
 			syntax_node[1].code_gen(struct_context);
@@ -1065,22 +1068,37 @@ parser::init_rules mparse_rules =
 		{ "Method", parser::forward }
 	}},
 	{ "Method", {
-		{ "Type Id { Block }", [](gen_node& syntax_node, AST_context* context){
+		{ "Type Id MethodAttr { Block }", [](gen_node& syntax_node, AST_context* context){
 			auto struct_context = static_cast<AST_struct_context*>(context);
 			if (struct_context->type)
 			{
+				auto fnattr = syntax_node[2].code_gen(context).get_data<function_attr>();
+				fnattr->insert(is_method);
 				context->collect_param_name = true;
 				context->function_param_name.resize(0);
 				auto type = syntax_node[0].code_gen(context).get_type();
 				auto name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
 				if (!type->isFunctionTy()) throw err("not function type");
-				context->collect_param_name = false;
-				AST_method_context new_context(struct_context, static_cast<FunctionType*>(type), name);
+				AST_method_context new_context(struct_context, static_cast<FunctionType*>(type), name, fnattr);
 				new_context.register_args();
-				syntax_node[2].code_gen(&new_context);
+				syntax_node[3].code_gen(&new_context);
+				delete fnattr;
 			}
 			return AST_result();
 		}}
+	}},
+	{ "MethodAttr", {
+		{ "MethodAttr MethodAttrElem", [](gen_node& syntax_node, AST_context* context){
+			auto fnattr = syntax_node[0].code_gen(context).get_data<function_attr>();
+			auto attr = syntax_node[1].code_gen(context).get_attr();
+			if (fnattr->count(attr)) throw err("function attribute redeclared");
+			fnattr->insert(attr);
+			return AST_result(fnattr);
+		}},
+		{ "", [](gen_node& syntax_node, AST_context* context){ return AST_result(new function_attr); } }
+	}},
+	{ "MethodAttrElem", {
+		{ "virtual", parser::attribute<is_virtual> }
 	}},
 	
 	{ "exprelem", {

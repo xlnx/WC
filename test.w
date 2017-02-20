@@ -1,7 +1,9 @@
-struct A
+class A
 {
 	int a;
 	float b;
+	fn () exec virtual
+	{}
 };
 
 fn (int a, int b) -> int sum
