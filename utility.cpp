@@ -24,12 +24,12 @@ llvm::Value* create_implicit_cast(llvm::Value* value, llvm::Type* type)
 		AST_result res(value, false);
 		if (type == int_type || type == char_type || type == bool_type) return res.cast_to<ltype::integer>(type);
 		if (type == float_type) return res.cast_to<ltype::floating_point>(type);
+		if (type->isFunctionTy()) return res.cast_to<ltype::function>(type);
 		if (type->isPointerTy())
 		{
 			if (type == void_ptr_type) return res.cast_to<ltype::void_pointer>(type);
 			return res.cast_to<ltype::pointer>(type);
 		}
-		if (type->isFunctionTy()) return res.cast_to<ltype::function>(type);
 		if (type->isArrayTy()) return res.cast_to<ltype::array>(type);
 		throw err("unexpected typename in casting");
 	}
@@ -77,7 +77,21 @@ llvm::Value* AST_result::get_rvalue() const
 	return get_any_among<ltype::integer, ltype::floating_point, ltype::pointer, ltype::function>(); 
 }
 
+llvm::FunctionType* methodlify(llvm::FunctionType* type)
+{
+	std::vector<llvm::Type*> args;
+	for (auto itr = type->param_begin(); ++itr != type->param_end();)
+		args.push_back(*itr);
+	return llvm::FunctionType::get(type->getReturnType(), args, false);
+}
 
+llvm::FunctionType* functionlify(llvm::FunctionType* ft, llvm::StructType* st)
+{
+	std::vector<llvm::Type*> args = { llvm::PointerType::getUnqual(st) };
+	for (auto itr = ft->param_begin(); itr != ft->param_end(); ++itr)
+		args.push_back(*itr);
+	return llvm::FunctionType::get(ft->getReturnType(), args, false);
+}
 
 
 // AST_namespace
@@ -119,12 +133,7 @@ void AST_namespace::add_func(llvm::Function* func, const std::string& name, func
 	if (name == "") throw err("cannot define a dummy function");
 	auto type = func->getFunctionType();
 	if (fnattr && fnattr->count(is_method))
-	{
-		std::vector<llvm::Type*> args;
-		for (auto itr = type->param_begin(); ++itr != type->param_end();)
-			args.push_back(*itr);
-		type = llvm::FunctionType::get(type->getReturnType(), args, false);
-	}
+		type = methodlify(type);
 	switch (name_map[name].second)
 	{
 	case is_overload_func: {
@@ -135,6 +144,7 @@ void AST_namespace::add_func(llvm::Function* func, const std::string& name, func
 		if (fnattr && fnattr->count(is_method))
 		{
 			fndata.flag = function_meta::is_method;
+			if (fnattr->count(is_virtual)) static_cast<AST_struct_context*>(this)->reg_vmethod(func, name, fnattr);
 			//fndata.object = static_cast<AST_struct_context*>(this)->selected;
 		}
 		else fndata.flag = function_meta::is_function; break;
@@ -148,6 +158,7 @@ void AST_namespace::add_func(llvm::Function* func, const std::string& name, func
 		if (fnattr && fnattr->count(is_method))
 		{
 			fndata.flag = function_meta::is_method;
+			if (fnattr->count(is_virtual)) static_cast<AST_struct_context*>(this)->reg_vmethod(func, name, fnattr);
 			//fndata.parent = static_cast<AST_struct_context*>(this);
 		}
 		else fndata.flag = function_meta::is_function;
@@ -161,7 +172,6 @@ AST_struct_context* AST_namespace::get_namespace(llvm::StructType* p)
 	if (!p->isStructTy()) throw err("target not struct type");
 	if (auto ptr = typed_namespace_map[p])
 	{
-		ptr->selected = nullptr;
 		return ptr;
 	}
 	else
@@ -178,7 +188,7 @@ AST_struct_context* AST_namespace::get_namespace(llvm::Value* p)
 	if (auto ptr = typed_namespace_map[static_cast<llvm::StructType*>(
 		static_cast<llvm::PointerType*>(p->getType())->getElementType())])
 	{
-		ptr->selected = p;
+		ptr->selected.push(p);
 		return ptr;
 	}
 	else

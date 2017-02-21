@@ -187,6 +187,7 @@ struct function_meta
 {
 	llvm::Function* ptr = nullptr;
 	enum { is_function, is_method } flag;
+	unsigned vtable_id = 0;
 	llvm::Value* object = nullptr;
 	explicit operator bool () const { return ptr; }
 };
@@ -203,6 +204,7 @@ using overload_map_type = std::map<func_sig, function_meta>;
 using function_attr = std::set<unsigned>;
 const unsigned is_method = 1;
 const unsigned is_virtual = 2;
+const unsigned is_override = 4;
 
 class AST_result
 {	
@@ -378,7 +380,7 @@ template <>
 		{
 		case is_overload: {
 			auto ptr = reinterpret_cast<overload_map_type*>(value);
-			if (ptr->size() == 1) return reinterpret_cast<llvm::Value*>(&ptr->begin()->second);
+			if (ptr->size() == 1) return reinterpret_cast<llvm::Value*>(ptr->begin()->second.ptr);
 			throw err("ambigious reference to overloaded function");
 		}
 		case is_rvalue: {
@@ -399,15 +401,11 @@ template <>
 		case is_lvalue: 
 			type = static_cast<llvm::AllocaInst*>(ptr)->getAllocatedType();
 			if (type->isPointerTy() && static_cast<llvm::PointerType*>(type)->getElementType()->isFunctionTy())
-			{
-				return lBuilder.CreateLoad(lBuilder.CreateLoad(ptr, "Load"), "Load");
-			} break;
+				return lBuilder.CreateLoad(ptr, "Load"); break;
 		case is_rvalue:
 			type = ptr->getType();
 			if (type->isPointerTy() && static_cast<llvm::PointerType*>(type)->getElementType()->isFunctionTy())
-			{
-				return lBuilder.CreateLoad(ptr, "Load");
-			}break;
+				return ptr; break;
 		}
 		return nullptr;
 	}
@@ -469,16 +467,23 @@ template <>
 template <>
 	llvm::Value* AST_result::get_casted<ltype::wstruct>() const
 		{ return nullptr; }
+		
+llvm::Value* get_struct_member(llvm::Value* agg, unsigned idx)
+{
+	std::vector<llvm::Value*> idxs = { lBuilder.getInt64(0), lBuilder.getInt32(idx) };
+	return llvm::GetElementPtrInst::CreateInBounds(agg, idxs, "PMember", lBuilder.GetInsertBlock());
+}
 
 class AST_namespace;
 class AST_struct_context;
 class AST_namespace
 {
 	friend class AST_struct_context;
-	enum mapped_value_type { is_none = 0, is_type, is_alloc, is_constant, is_overload_func };
-	std::map<std::string, std::pair<void*, mapped_value_type>> name_map;
 	std::map<llvm::StructType*, AST_struct_context*> typed_namespace_map;
 	AST_namespace* parent_namespace = nullptr;
+protected:
+	enum mapped_value_type { is_none = 0, is_type, is_alloc, is_constant, is_overload_func };
+	std::map<std::string, std::pair<void*, mapped_value_type>> name_map;
 public:
 	AST_namespace(AST_namespace* p):
 		parent_namespace(p)
@@ -516,33 +521,147 @@ public:
 		{ return llvm::BasicBlock::Create(llvm::getGlobalContext(), block_name); }
 };
 
+llvm::FunctionType* methodlify(llvm::FunctionType* ft);
+llvm::FunctionType* functionlify(llvm::FunctionType* ft, llvm::StructType* st);
+
 class AST_struct_context;
 class AST_struct_context: public AST_context
 {
 	std::vector<llvm::Type*> elems;
 	std::map<std::string, unsigned> idx_lookup;
+	struct vmethod_data
+	{
+		llvm::Function* func;
+		bool is_override;
+		std::string name;
+	};
+	std::vector<vmethod_data> vmethod_list;
+	using inh_vec = std::vector<AST_struct_context*>;
 protected:
-	static const unsigned not_settled;
-	static const unsigned confirmed;
-	static const unsigned confirmed_not;
+	std::vector<llvm::Constant*> vmt;
 public:
-	unsigned has_vbptr = 0;
-	llvm::Value* selected = nullptr;
+	std::string sname;
+	std::stack<llvm::Value*> selected;
 	llvm::StructType* type = nullptr;
+	bool chk_vptr = false;
+	bool is_vclass = false;
+	llvm::Value* vtable = nullptr;
 	AST_struct_context* base = nullptr;
 	AST_struct_context(AST_context* p, AST_struct_context* b = nullptr):
 		AST_context(p),
 		base(b)
 	{}
 public:
+	llvm::Function* get_virtual_function(llvm::Value* obj, unsigned idx) const
+	{
+		llvm::Value* v = lBuilder.CreateLoad(
+			get_struct_member(
+				new llvm::BitCastInst(
+					lBuilder.CreateLoad(
+						get_struct_member(obj, base ? 1 : 0), "LoadVPtr"
+					), vtable->getType(), "VMTCast", lBuilder.GetInsertBlock()	
+				), idx
+			), "VMethod"
+		);
+		return static_cast<llvm::Function*>(v);
+	}
+	void verify_vmethod()
+	{
+		chk_vptr = true;
+		is_vclass |= base && base->vtable;
+	}
+	void initialize(llvm::Value* vptr = nullptr)
+	{
+		if (selected.empty()) throw err("nothing is selected to initialize");
+		if (!vptr) vptr = vtable;
+		if (vtable)
+		{
+			llvm::Value* val = new llvm::BitCastInst(vptr, void_ptr_type, "BitCast", lBuilder.GetInsertBlock());
+			lBuilder.CreateStore(val, get_struct_member(selected.top(), base ? 1 : 0));
+		}
+		if (base)
+		{
+			base->selected.push(get_struct_member(selected.top(), 0));
+			base->initialize(vptr);
+			base->selected.pop();
+		}
+	}
+	void verify()
+	{
+		if (is_vclass)
+		{
+			if (base && base->vtable)
+			{
+				vmt = base->vmt;
+				for (auto& v: vmethod_list) if (v.is_override)
+				{	// base ->derived
+					bool m_override = false;
+					func_sig sig = gen_sig(methodlify(v.func->getFunctionType()));
+					if (base->name_map[v.name].second == is_overload_func)
+					{
+						auto map = reinterpret_cast<overload_map_type*>(base->name_map[v.name].first);
+						auto& stg = (*map)[sig];
+						if (stg && stg.vtable_id)
+						{
+							m_override = true;
+							if (static_cast<llvm::Function*>(vmt[stg.vtable_id - 1])->getReturnType() !=
+								v.func->getReturnType()) throw err("override method returned a different type: " + v.name);
+							vmt[stg.vtable_id - 1] = v.func;
+							(*reinterpret_cast<overload_map_type*>(name_map[v.name].first))[sig].vtable_id = stg.vtable_id;
+						}
+					}
+					if (!m_override) throw err("override method didn't override anything: " + v.name);
+				}
+				for (auto& dt: base->name_map)
+				{
+					if (dt.second.second == is_overload_func)
+					{	// for each direct base vmethod
+						for (auto& f: *reinterpret_cast<overload_map_type*>(dt.second.first))
+						if (f.second.vtable_id)
+						{
+							if (name_map[dt.first].second == is_none)
+							{
+								auto ptr = new overload_map_type;
+								(*ptr)[gen_sig(methodlify(f.second.ptr->getFunctionType()))] = f.second;
+								name_map[dt.first] = make_pair(ptr, mapped_value_type::is_overload_func);
+							}
+							else if (auto map = reinterpret_cast<overload_map_type*>(name_map[dt.first].first))
+							{
+								auto stg = (*map)[gen_sig(methodlify(f.second.ptr->getFunctionType()))];
+								if (stg && !stg.vtable_id) throw err("base class virtual method has the same function signature: " + dt.first);
+								if (!stg) stg = f.second;
+							}
+							else throw err("cannot recover virtual method by name: " + dt.first);
+						}
+					}
+				}
+			}
+			for (auto& v: vmethod_list) if (!v.is_override)
+			{
+				vmt.push_back(v.func);
+				auto map = reinterpret_cast<overload_map_type*>(name_map[v.name].first);
+				map->operator[](gen_sig(methodlify(v.func->getFunctionType()))).vtable_id = vmt.size();
+			}
+			auto cvtable = llvm::ConstantStruct::getAnon(vmt);
+			vtable = new llvm::GlobalVariable(*lModule, cvtable->getType(), true,
+				llvm::GlobalValue::ExternalLinkage, cvtable, "vtable");
+		}
+	}
 	void alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init) override
 	{
+		if (type->isFunctionTy()) throw err("cannot create unimplemented function in class context");
 		elems.push_back(type);
 		idx_lookup[name] = elems.size();
 		name_map[name].second = is_alloc;
 	}
 	void finish_struct(const std::string& name)
 	{
+		sname = name;
+		if (is_vclass)
+		{
+			elems.insert(elems.begin(), void_ptr_type);
+			for (auto&v : idx_lookup) ++v.second;
+		}
 		if (base)
 		{
 			elems.insert(elems.begin(), base->type);
@@ -561,42 +680,33 @@ public:
 		case is_alloc: return get_var(name);
 		case is_overload_func: {
 			auto map = reinterpret_cast<overload_map_type*>(name_map[name].first);
-			for (auto& f: *map) f.second.object = selected;
-			selected = nullptr;
+			for (auto& f: *map) f.second.object = selected.top();
 			return AST_result(map);
 		}
 		case is_constant: return AST_result(reinterpret_cast<llvm::Value*>(name_map[name].first), false);
 		case is_none: if (base){
-				auto sel_back = base->selected;
-				std::vector<llvm::Value*> idxs = { lBuilder.getInt64(0), lBuilder.getInt32(0) };
-				base->selected = selected ? llvm::GetElementPtrInst::CreateInBounds(
-					selected, idxs, "PBase", lBuilder.GetInsertBlock()) : nullptr;
-				auto res = base->get_id(name);
-				base->selected = sel_back;
-				selected = nullptr;
-				return res;
-			}
-			if (parent_namespace && !precise) return parent_namespace->get_id(name);
-			else throw err("undefined identifier " + name + " in this namespace");
+			if (!selected.empty()) base->selected.push(get_struct_member(selected.top(), 0));
+			auto res = base->get_id(name);
+			if (!selected.empty()) base->selected.pop();
+			return res;
 		}
+		if (parent_namespace && !precise) return parent_namespace->get_id(name);
+		else throw err("undefined identifier " + name + " in namespace: " + sname);
+		}
+	}
+	void reg_vmethod(llvm::Function* f, const std::string& name, function_attr* at)
+	{
+		vmethod_list.push_back({ f, at->count(is_override), name } );
 	}
 protected:
 	AST_result get_var(const std::string& name) override
 	{
-		if (!selected) throw err("class object not selected");
+		if (selected.empty()) throw err("class object not selected");
 		if (auto idx = idx_lookup[name])
-		{
-			std::vector<llvm::Value*> idxs = { lBuilder.getInt64(0), lBuilder.getInt32(idx - 1) };
-			return AST_result(llvm::GetElementPtrInst::CreateInBounds(
-				selected, idxs, "PElem", lBuilder.GetInsertBlock()), true);
-		}
+			return AST_result(get_struct_member(selected.top(), idx - 1), true);
 		throw err("class has no variable named " + name);
 	}
 };
-
-const unsigned AST_struct_context::not_settled = 0;
-const unsigned AST_struct_context::confirmed = 1;
-const unsigned AST_struct_context::confirmed_not = 2;
 
 class AST_global_context: public AST_context
 {
@@ -610,6 +720,9 @@ public:
 			throw err("cannot alloc a dummy variable");
 		if (init)
 			init = create_implicit_cast(init, type);
+		if (type->isFunctionTy()) throw err("cannot create unimplemented function in local context");
+		if (type->isStructTy())
+			throw err("cannot define a global object, ctor required");
 		auto alloc = new llvm::GlobalVariable(*lModule, type, false, 
 			llvm::GlobalValue::ExternalLinkage, static_cast<llvm::Constant*>(init));
 		add_alloc(alloc, name);
@@ -655,13 +768,18 @@ public:
 		{ static_cast<AST_local_context*>(parent)->make_return(ret); }
 	void alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init) override
 	{
-		if (name == "")
-			throw err("cannot alloc a dummy variable");
-		if (init)
-			init = create_implicit_cast(init, type);
+		if (name == "") throw err("cannot alloc a dummy variable");
+		if (type->isFunctionTy()) throw err("cannot create unimplemented function in local context");
+		if (init) init = create_implicit_cast(init, type);
 		lBuilder.SetInsertPoint(get_alloc_block());
 		auto alloc = lBuilder.CreateAlloca(type);
 		activate();
+		if (type->isStructTy())
+		{
+			auto np = get_namespace(alloc);
+			np->initialize();
+			np->selected.pop();
+		}
 		if (init) lBuilder.CreateStore(init, alloc);
 		add_alloc(alloc, name);
 	}
@@ -722,6 +840,7 @@ class AST_function_context: public AST_local_context
 	llvm::BasicBlock* return_block;
 	llvm::Value* retval;
 protected:
+	std::string fname;
 	llvm::Function* function;
 	llvm::BasicBlock* get_alloc_block() const override
 		{ return alloc_block; }
@@ -731,6 +850,7 @@ public:
 	AST_function_context(AST_context* p, llvm::Function* F, const std::string& name, function_attr* fnattr = nullptr):
 		AST_local_context(p),
 		function(F),
+		fname(name),
 		alloc_block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "alloc", F)),
 		entry_block(block),
 		return_block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "return"))
@@ -777,12 +897,17 @@ public:
 
 class AST_method_context: public AST_function_context
 {
+	function_attr attr;
 public:
 	AST_method_context(AST_struct_context* p, llvm::FunctionType* ft, const std::string& name, function_attr* fnattr):
-		AST_function_context(p, fn2method(p->type, ft, name), name, (fnattr->insert(is_method), fnattr))
+		AST_function_context(p, fn2method(p->type, ft, name), name, (fnattr->insert(is_method), fnattr)),
+		attr(*fnattr)
 	{}
 	~AST_method_context() override
-		{ static_cast<AST_struct_context*>(parent)->selected = nullptr; }
+	{
+		auto p = static_cast<AST_struct_context*>(parent);
+		p->selected.pop();
+	}
 	void register_args() override
 	{
 		unsigned i = 0;
@@ -792,15 +917,12 @@ public:
 			itr->setName(parent->function_param_name[i]);
 			alloc_var(itr->getType(), parent->function_param_name[i], itr);
 		}
-		static_cast<AST_struct_context*>(parent)->selected = function->arg_begin();
+		static_cast<AST_struct_context*>(parent)->selected.push(function->arg_begin());
 	}
 private:
 	static llvm::Function* fn2method(llvm::StructType* st, llvm::FunctionType* ft, const std::string& name)
 	{	
-		std::vector<llvm::Type*> args = { llvm::PointerType::getUnqual(st) };
-		for (auto itr = ft->param_begin(); itr != ft->param_end(); ++itr)
-			args.push_back(*itr);
-		ft = llvm::FunctionType::get(ft->getReturnType(), args, false);
+		ft = functionlify(ft, st);
 		return llvm::Function::Create(ft, llvm::Function::ExternalLinkage, type_names[st] + "." + name, lModule);
 	}
 };

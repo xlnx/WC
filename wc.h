@@ -26,6 +26,7 @@ lexer::init_rules mlex_rules =
 		{ "fn", "fn", {word, no_attr} },
 		{ "arr", "arr", {word, no_attr} },
 		{ "virtual", "virtual", {word, no_attr} },
+		{ "override", "override", {word, no_attr} },
 		{ "switch", "switch", {word, no_attr} },
 		{ "case", "case", {word, no_attr} },
 		{ "default", "default", {word, no_attr} },
@@ -141,7 +142,7 @@ parser::expr_init_rules mexpr_rules =
 			auto alloc = val.get_lvalue();
 			auto LHS = val.get_among<ltype::integer, ltype::floating_point>();
 			auto RHS = syntax_node[1].code_gen(context).get_among<ltype::integer, ltype::floating_point>();
-			create_implicit_cast(RHS.first, LHS.first->getType());
+			RHS.first = create_implicit_cast(RHS.first, LHS.first->getType());
 			switch (LHS.second)
 			{
 			case 0: lBuilder.CreateStore(lBuilder.CreateSDiv(LHS.first, RHS.first, "SDiv"), alloc); return val;
@@ -153,7 +154,7 @@ parser::expr_init_rules mexpr_rules =
 			auto alloc = val.get_lvalue();
 			auto LHS = val.get_among<ltype::integer, ltype::floating_point>();
 			auto RHS = syntax_node[1].code_gen(context).get_among<ltype::integer, ltype::floating_point>();
-			create_implicit_cast(RHS.first, LHS.first->getType());
+			RHS.first = create_implicit_cast(RHS.first, LHS.first->getType());
 			switch (LHS.second)
 			{
 			case 0: lBuilder.CreateStore(lBuilder.CreateMul(LHS.first, RHS.first, "Mul"), alloc); return val;
@@ -165,7 +166,7 @@ parser::expr_init_rules mexpr_rules =
 			auto alloc = val.get_lvalue();
 			auto LHS = val.get_among<ltype::integer>();
 			auto RHS = syntax_node[1].code_gen(context).get_among<ltype::integer>();
-			create_implicit_cast(RHS.first, LHS.first->getType());
+			RHS.first = create_implicit_cast(RHS.first, LHS.first->getType());
 			switch (LHS.second)
 			{
 			case 0: lBuilder.CreateStore(lBuilder.CreateSRem(LHS.first, RHS.first, "SRem"), alloc); return val;
@@ -176,7 +177,7 @@ parser::expr_init_rules mexpr_rules =
 			auto alloc = val.get_lvalue();
 			auto LHS = val.get_among<ltype::integer, ltype::floating_point>();
 			auto RHS = syntax_node[1].code_gen(context).get_among<ltype::integer, ltype::floating_point>();
-			create_implicit_cast(RHS.first, LHS.first->getType());
+			RHS.first = create_implicit_cast(RHS.first, LHS.first->getType());
 			switch (LHS.second)
 			{
 			case 0: lBuilder.CreateStore(lBuilder.CreateAdd(LHS.first, RHS.first, "Add"), alloc); return val;
@@ -188,7 +189,7 @@ parser::expr_init_rules mexpr_rules =
 			auto alloc = val.get_lvalue();
 			auto LHS = val.get_among<ltype::integer, ltype::floating_point>();
 			auto RHS = syntax_node[1].code_gen(context).get_among<ltype::integer, ltype::floating_point>();
-			create_implicit_cast(RHS.first, LHS.first->getType());
+			RHS.first = create_implicit_cast(RHS.first, LHS.first->getType());
 			switch (LHS.second)
 			{
 			case 0: lBuilder.CreateStore(lBuilder.CreateSub(LHS.first, RHS.first, "Sub"), alloc); return val;
@@ -200,7 +201,7 @@ parser::expr_init_rules mexpr_rules =
 			auto alloc = val.get_lvalue();
 			auto LHS = val.get_among<ltype::integer>();
 			auto RHS = syntax_node[1].code_gen(context).get_among<ltype::integer>();
-			create_implicit_cast(RHS.first, LHS.first->getType());
+			RHS.first = create_implicit_cast(RHS.first, LHS.first->getType());
 			switch (LHS.second)
 			{
 			case 0: lBuilder.CreateStore(lBuilder.CreateShl(LHS.first, RHS.first, "Shl"), alloc); return val;
@@ -211,7 +212,7 @@ parser::expr_init_rules mexpr_rules =
 			auto alloc = val.get_lvalue();
 			auto LHS = val.get_among<ltype::integer>();
 			auto RHS = syntax_node[1].code_gen(context).get_among<ltype::integer>();
-			create_implicit_cast(RHS.first, LHS.first->getType());
+			RHS.first = create_implicit_cast(RHS.first, LHS.first->getType());
 			switch (LHS.second)
 			{
 			case 0: lBuilder.CreateStore(lBuilder.CreateAShr(LHS.first, RHS.first, "AShr"), alloc); return val;
@@ -222,7 +223,7 @@ parser::expr_init_rules mexpr_rules =
 			auto alloc = val.get_lvalue();
 			auto LHS = val.get_among<ltype::integer>();
 			auto RHS = syntax_node[1].code_gen(context).get_among<ltype::integer>();
-			create_implicit_cast(RHS.first, LHS.first->getType());
+			RHS.first = create_implicit_cast(RHS.first, LHS.first->getType());
 			switch (LHS.second)
 			{
 			case 0: lBuilder.CreateStore(lBuilder.CreateAnd(LHS.first, RHS.first, "And"), alloc); return val;
@@ -233,7 +234,7 @@ parser::expr_init_rules mexpr_rules =
 			auto alloc = val.get_lvalue();
 			auto LHS = val.get_among<ltype::integer>();
 			auto RHS = syntax_node[1].code_gen(context).get_among<ltype::integer>();
-			create_implicit_cast(RHS.first, LHS.first->getType());
+			RHS.first = create_implicit_cast(RHS.first, LHS.first->getType());
 			switch (LHS.second)
 			{
 			case 0: lBuilder.CreateStore(lBuilder.CreateXor(LHS.first, RHS.first, "Xor"), alloc); return val;
@@ -244,7 +245,7 @@ parser::expr_init_rules mexpr_rules =
 			auto alloc = val.get_lvalue();
 			auto LHS = val.get_among<ltype::integer>();
 			auto RHS = syntax_node[1].code_gen(context).get_among<ltype::integer>();
-			create_implicit_cast(RHS.first, LHS.first->getType());
+			RHS.first = create_implicit_cast(RHS.first, LHS.first->getType());
 			switch (LHS.second)
 			{
 			case 0: lBuilder.CreateStore(lBuilder.CreateOr(LHS.first, RHS.first, "Or"), alloc); return val;
@@ -608,6 +609,7 @@ parser::expr_init_rules mexpr_rules =
 					throw err("function param number mismatch");
 				for (unsigned i = 0; i < params->size(); ++i)
 					(*params)[i] = create_implicit_cast((*params)[i], function_proto->getParamType(i));
+				break;
 			}
 			case 0: {
 				func_sig sig;
@@ -626,6 +628,7 @@ parser::expr_init_rules mexpr_rules =
 				for (auto& f: *map) f.second.object = nullptr;
 			}
 			}
+			
 			auto call_inst = function->getReturnType() != void_type ? lBuilder.CreateCall(function, *params, "Call")
 				: lBuilder.CreateCall(function, *params);
 			delete params;
@@ -636,7 +639,39 @@ parser::expr_init_rules mexpr_rules =
 			auto struct_inst = syntax_node[0].code_gen(context).get_as<ltype::wstruct>();
 			auto struct_namespace = context->get_namespace(struct_inst);
 			auto& name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
-			return struct_namespace->get_id(name, true);
+			auto ret = struct_namespace->get_id(name, true);
+			struct_namespace->selected.pop();
+			return ret;
+		}},
+		{ "% -> %Id ( %$ )", left_asl, [](gen_node& syntax_node, AST_context* context){
+			auto params = syntax_node[2].code_gen(context).get_data<std::vector<Value*>>();
+			llvm::Function* function = nullptr;
+			auto struct_inst = syntax_node[0].code_gen(context).get_as<ltype::pointer>();
+			
+			if (!static_cast<PointerType*>(struct_inst->getType())->getElementType()->isStructTy())
+				throw err("target isnot struct pointer");
+			auto struct_namespace = context->get_namespace(struct_inst);
+			auto& name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
+			auto map = reinterpret_cast<overload_map_type*>(
+				struct_namespace->get_id(name, true).get_as<ltype::overload>());
+			struct_namespace->selected.pop();
+			func_sig sig;
+			for (auto arg: *params) sig.push_back(arg->getType());
+			auto& fndata = (*map)[sig];
+			if (!fndata) throw err("none of the overloaded functions matches the given param");
+			
+			params->insert(params->begin(), fndata.object);
+			if (fndata.vtable_id)
+				function = struct_namespace->get_virtual_function(fndata.object, fndata.vtable_id - 1);
+			else
+				function = fndata.ptr;
+			for (auto& f: *map) f.second.object = nullptr;
+			
+			auto call_inst = function->getReturnType() != void_type ? lBuilder.CreateCall(function, *params, "Call")
+				: lBuilder.CreateCall(function, *params);
+			delete params;
+			if (function->getReturnType() != void_type) return AST_result(call_inst, false);
+				else return AST_result();
 		}},
 		{ "% -> %Id", left_asl, [](gen_node& syntax_node, AST_context* context){
 			auto struct_inst = syntax_node[0].code_gen(context).get_as<ltype::pointer>();
@@ -644,7 +679,9 @@ parser::expr_init_rules mexpr_rules =
 				throw err("target isnot struct pointer");
 			auto struct_namespace = context->get_namespace(struct_inst);
 			auto& name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
-			return struct_namespace->get_id(name, true);
+			auto ret = struct_namespace->get_id(name, true);
+			struct_namespace->selected.pop();
+			return ret;
 		}},
 	},
 };
@@ -1048,21 +1085,17 @@ parser::init_rules mparse_rules =
 		{ "class Id StructBase { StructInterface }", [](gen_node& syntax_node, AST_context* context){
 			auto& class_name =  static_cast<term_node&>(syntax_node[0]).data.attr->value;
 			auto base_val = syntax_node[1].code_gen(context);
-			if (!base_val)
-			{
-				AST_struct_context* struct_context = new AST_struct_context(context);
-				syntax_node[2].code_gen(struct_context);
-				struct_context->finish_struct(class_name);
-				syntax_node[2].code_gen(struct_context);
-			}
-			else
-			{
-				AST_struct_context* struct_context = new AST_struct_context(context,
-					context->get_namespace(static_cast<StructType*>(base_val.get_type())));
-				syntax_node[2].code_gen(struct_context);
-				struct_context->finish_struct(class_name);
-				syntax_node[2].code_gen(struct_context);
-			}
+			AST_struct_context* struct_context = new AST_struct_context(context, !base_val ? nullptr :
+				context->get_namespace(static_cast<StructType*>(base_val.get_type())));
+			
+			syntax_node[2].code_gen(struct_context);	// vtable
+			struct_context->verify_vmethod();
+			
+			syntax_node[2].code_gen(struct_context);
+			struct_context->finish_struct(class_name);
+			
+			syntax_node[2].code_gen(struct_context);
+			struct_context->verify();
 			return AST_result();
 		}},
 	}},
@@ -1079,9 +1112,9 @@ parser::init_rules mparse_rules =
 		{ "", parser::empty }
 	}},
 	{ "StructInterfaceItem", {
-		{ "Type Id ;", [](gen_node& syntax_node, AST_context* context){
+		{ "Type Id ;", [](gen_node& syntax_node, AST_context* context){	
 			auto struct_context = static_cast<AST_struct_context*>(context);
-			if (!struct_context->type)
+			if (struct_context->chk_vptr && !struct_context->type)
 			{
 				auto type = syntax_node[0].code_gen(context).get_type();
 				auto name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
@@ -1094,10 +1127,15 @@ parser::init_rules mparse_rules =
 	{ "Method", {
 		{ "Type Id MethodAttr { Block }", [](gen_node& syntax_node, AST_context* context){
 			auto struct_context = static_cast<AST_struct_context*>(context);
-			if (struct_context->type)
+			if (!struct_context->chk_vptr)
 			{
 				auto fnattr = syntax_node[2].code_gen(context).get_data<function_attr>();
-				fnattr->insert(is_method);
+				if (fnattr->count(is_virtual)) struct_context->is_vclass = true;
+				delete fnattr;
+			}
+			else if (struct_context->type)
+			{
+				auto fnattr = syntax_node[2].code_gen(context).get_data<function_attr>();
 				context->collect_param_name = true;
 				context->function_param_name.resize(0);
 				auto type = syntax_node[0].code_gen(context).get_type();
@@ -1117,12 +1155,18 @@ parser::init_rules mparse_rules =
 			auto attr = syntax_node[1].code_gen(context).get_attr();
 			if (fnattr->count(attr)) throw err("function attribute redeclared");
 			fnattr->insert(attr);
+			if (attr == is_override) fnattr->insert(is_virtual);
 			return AST_result(fnattr);
 		}},
-		{ "", [](gen_node& syntax_node, AST_context* context){ return AST_result(new function_attr); } }
+		{ "", [](gen_node& syntax_node, AST_context* context){
+			auto fnattr = new function_attr; 
+			fnattr->insert(is_method);
+			return AST_result(fnattr);
+		}}
 	}},
 	{ "MethodAttrElem", {
-		{ "virtual", parser::attribute<is_virtual> }
+		{ "virtual", parser::attribute<is_virtual> },
+		{ "override", parser::attribute<is_override> }
 	}},
 	
 	{ "exprelem", {
