@@ -380,7 +380,13 @@ template <>
 		{
 		case is_overload: {
 			auto ptr = reinterpret_cast<overload_map_type*>(value);
-			if (ptr->size() == 1) return reinterpret_cast<llvm::Value*>(ptr->begin()->second.ptr);
+			if (ptr->size() == 1)
+			{
+				auto & item = ptr->begin()->second;
+				if (item.flag == function_meta::is_method)
+					throw err("cannot create reference to a class method");
+				return reinterpret_cast<llvm::Value*>(item.ptr);
+			}
 			throw err("ambigious reference to overloaded function");
 		}
 		case is_rvalue: {
@@ -666,6 +672,10 @@ public:
 		{
 			elems.insert(elems.begin(), base->type);
 			for (auto& v: idx_lookup) ++v.second;
+		}
+		if (elems.empty())
+		{
+			elems.push_back(char_type);
 		}
 		type = llvm::StructType::create(elems, name);
 		parent->add_type(type, name);

@@ -893,17 +893,28 @@ parser::init_rules mparse_rules =
 	
 	// Expressions
 	{ "Expr", {
-		{ "Expr, expr", [](gen_node& syntax_node, AST_context* context){
+		/*{ "Expr, expr", [](gen_node& syntax_node, AST_context* context){
 			syntax_node[0].code_gen(context);
 			return syntax_node[1].code_gen(context);
-		}},
-		{ "expr", parser::forward }
+		}},*/
+		{ "expr", [](gen_node& syntax_node, AST_context* context){
+			auto data = syntax_node[0].code_gen(context);
+			if (auto ptr = reinterpret_cast<overload_map_type*>(data.get<ltype::overload>()))
+			{
+				for (auto& elem: *ptr)
+				{
+					if (elem.second.flag == function_meta::is_method)
+						elem.second.object = nullptr;
+				}
+			}
+			return data;
+		}}
 	}},
 	{ "ConstExpr", {
-		{ "ConstExpr, constexpr", [](gen_node& syntax_node, AST_context* context){
+		/*{ "ConstExpr, constexpr", [](gen_node& syntax_node, AST_context* context){
 			syntax_node[0].code_gen(context);
 			return syntax_node[1].code_gen(context);
-		}},
+		}},*/
 		{ "constexpr", parser::forward }
 	}},
 	{ "Type", {
@@ -1096,6 +1107,7 @@ parser::init_rules mparse_rules =
 			
 			syntax_node[2].code_gen(struct_context);
 			struct_context->verify();
+			
 			return AST_result();
 		}},
 	}},
