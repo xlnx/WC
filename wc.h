@@ -22,6 +22,7 @@ lexer::init_rules mlex_rules =
 		{ "for", "for", {word, no_attr} },
 		{ "do", "do", {word, no_attr} },
 		{ "ptr", "ptr", {word, no_attr} },
+		{ "ref", "ref", {word, no_attr} },
 		{ "pointer", "pointer", {word, no_attr} },
 		{ "fn", "fn", {word, no_attr} },
 		{ "arr", "arr", {word, no_attr} },
