@@ -106,14 +106,15 @@ void AST_namespace::add_type(llvm::Type* type, const std::string& name)
 	}
 }
 
-void AST_namespace::add_alloc(llvm::Value* alloc, const std::string& name)
+void AST_namespace::add_alloc(llvm::Value* alloc, const std::string& name, bool is_reference)
 {
 	if (name == "") throw err("cannot define a dummy variable");
 	switch (name_map[name].second)
 	{
 	case is_alloc: throw err("redefined variable: " + name);
 	default: throw err("name conflicted: " + name);
-	case is_none: name_map[name].second = is_alloc; name_map[name].first = alloc; alloc->setName(name); 
+	case is_none: name_map[name].second = is_reference ? is_ref : is_alloc;
+		name_map[name].first = alloc; alloc->setName(name); 
 	}
 }
 
@@ -214,6 +215,7 @@ AST_result AST_namespace::get_var(const std::string& name)
 	switch (name_map[name].second)
 	{
 	case is_alloc: return AST_result(reinterpret_cast<llvm::Value*>(name_map[name].first), true);
+	case is_ref: return AST_result(lBuilder.CreateLoad(reinterpret_cast<llvm::Value*>(name_map[name].first), "LoadRef"), true);
 	case is_overload_func: return AST_result(reinterpret_cast<overload_map_type*>(name_map[name].first));
 	case is_none: if (parent_namespace) return parent_namespace->get_var(name);
 		else throw err("undefined variable: " + name);
@@ -237,7 +239,8 @@ AST_result AST_namespace::get_id(const std::string& name, bool precise)
 	switch (name_map[name].second)
 	{
 	case is_type: return get_type(name);
-	case is_alloc: return get_var(name);
+	case is_alloc: case is_ref: return get_var(name);
+	//case is_ref: return lBuilder.CreateLoad(get_var(name));
 	case is_overload_func: return AST_result(reinterpret_cast<overload_map_type*>(name_map[name].first));
 	case is_constant: return AST_result(reinterpret_cast<llvm::Value*>(name_map[name].first), false);
 	case is_none: if (parent_namespace && !precise) return parent_namespace->get_id(name);
@@ -274,7 +277,6 @@ AST_function_context::~AST_function_context()
 	attrs.push_back(PAS);
 	function_attrs = llvm::AttributeSet::get(lModule->getContext(), attrs);
 	function->setAttributes(function_attrs);
-	
 	llvm::verifyFunction(*function);
 	#ifdef WC_DEBUG
 	function->dump();

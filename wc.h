@@ -26,6 +26,8 @@ lexer::init_rules mlex_rules =
 		{ "pointer", "pointer", {word, no_attr} },
 		{ "fn", "fn", {word, no_attr} },
 		{ "arr", "arr", {word, no_attr} },
+		{ "let", "let", {word, no_attr} },
+		{ "lambda", "lambda", {word, no_attr} },
 		{ "virtual", "virtual", {word, no_attr} },
 		{ "override", "override", {word, no_attr} },
 		{ "switch", "switch", {word, no_attr} },
@@ -685,6 +687,20 @@ parser::expr_init_rules mexpr_rules =
 			return ret;
 		}},
 	},
+	
+	{
+		{ "lambda %LambdaType { %Block }", left_asl, [](gen_node& syntax_node, AST_context* T){
+			auto context = T->get_global_context();
+			context->collect_param_name = true;
+			context->function_param_name.resize(0);
+			auto type = syntax_node[0].code_gen(context).get_type();
+			Function* F = Function::Create(static_cast<FunctionType*>(type), Function::ExternalLinkage, ".lambda", lModule);
+			AST_function_context new_context(context, F);
+			new_context.register_args();
+			syntax_node[1].code_gen(&new_context);
+			return AST_result(F, false);
+		}},
+	},
 };
 
 using function_params = vector<Type*>;
@@ -863,6 +879,7 @@ parser::init_rules mparse_rules =
 			return AST_result();
 		}},
 		{ "LocalVarDefine ;", parser::forward },
+		{ "LocalRefDefine ;", parser::forward },
 		{ "TypeDefine ;", parser::forward },
 		{ "Expr ;", parser::forward },
 		{ "StmtBlock", parser::forward },
@@ -967,6 +984,28 @@ parser::init_rules mparse_rules =
 		}},
 		{ "TypeElem", parser::forward }		// dummy
 	}},
+	{ "LambdaType", {
+		{ "( FunctionParams ) FunctionRetType", [](gen_node& syntax_node, AST_context* context){
+			auto base_type = syntax_node[1].code_gen(context).get_type();
+			if (base_type->isArrayTy())
+				throw err("function cannot return an array");
+			if (base_type->isFunctionTy())
+				throw err("function cannot return a function");
+			
+			auto params = syntax_node[0].code_gen(context).get_data<function_params>();
+			auto ret = FunctionType::get(base_type, *params, false);	// cannot return an array
+			type_names[ret] = type_names[base_type] + "(";
+			if (params->size())
+			{
+				type_names[ret] += type_names[(*params)[0]];
+				for (auto itr = params->begin() + 1; itr != params->end(); ++itr)
+					type_names[ret] += ", " + type_names[*itr];
+			}
+			type_names[ret] += ")";
+			delete params;
+			return AST_result(ret);
+		}},
+	}},
 	{ "FunctionRetType", {
 		{ "-> Type", parser::forward },
 		{ "", [](gen_node&, AST_context*){ return AST_result(void_type); } }
@@ -1032,7 +1071,7 @@ parser::init_rules mparse_rules =
 			context->function_param_name.resize(0);
 			auto type = syntax_node[0].code_gen(context).get_type();
 			auto name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
-			if (!type->isFunctionTy()) throw err("not function type");
+			if (!type->isFunctionTy()) throw err("target is not function type");
 			Function* F = Function::Create(static_cast<FunctionType*>(type), Function::ExternalLinkage, name, lModule);
 			AST_function_context new_context(context, F, name);
 			new_context.register_args();
@@ -1055,7 +1094,8 @@ parser::init_rules mparse_rules =
 			auto init_expr = syntax_node[2].code_gen(context);
 			Constant* init = static_cast<Constant*>(init_expr.flag != AST_result::is_none ?
 				init_expr.get_rvalue() : nullptr);		// init this value implicitly by default
-			context->alloc_var(type, static_cast<term_node&>(syntax_node[1]).data.attr->value, init);
+			if (!type && !init) throw err("let clause must be initialized");
+			context->alloc_var(type ? type : init->getType(), static_cast<term_node&>(syntax_node[1]).data.attr->value, init);
 			return AST_result(type);
 		}},
 		{ "Type Id GlobalInitExpr", [](gen_node& syntax_node, AST_context* context){
@@ -1065,6 +1105,11 @@ parser::init_rules mparse_rules =
 				init_expr.get_rvalue() : nullptr);		// init this value implicitly by default
 			context->alloc_var(type, static_cast<term_node&>(syntax_node[1]).data.attr->value, init);
 			return AST_result(type);
+		}},
+		{ "let Id GlobalInitExpr", [](gen_node& syntax_node, AST_context* context){
+			auto init = syntax_node[1].code_gen(context).get_rvalue();
+			context->alloc_var(init->getType(), static_cast<term_node&>(syntax_node[0]).data.attr->value, init);
+			return AST_result((Type*)nullptr);
 		}}
 	}},
 	{ "GlobalInitExpr", {
@@ -1076,7 +1121,8 @@ parser::init_rules mparse_rules =
 			Type* type = syntax_node[0].code_gen(context).get_type();
 			auto init_expr = syntax_node[2].code_gen(context);
 			auto init = init_expr.flag != AST_result::is_none ? init_expr.get_rvalue() : nullptr;		// no init
-			context->alloc_var(type, static_cast<term_node&>(syntax_node[1]).data.attr->value, init);
+			if (!type && !init) throw err("let clause must be initialized");
+			context->alloc_var(type ? type : init->getType(), static_cast<term_node&>(syntax_node[1]).data.attr->value, init);
 			return AST_result(type);
 		}},
 		{ "Type Id InitExpr", [](gen_node& syntax_node, AST_context* context){
@@ -1085,6 +1131,24 @@ parser::init_rules mparse_rules =
 			auto init = init_expr.flag != AST_result::is_none ? init_expr.get_rvalue() : nullptr;		// no init
 			context->alloc_var(type, static_cast<term_node&>(syntax_node[1]).data.attr->value, init);
 			return AST_result(type);
+		}},
+		{ "let Id InitExpr", [](gen_node& syntax_node, AST_context* context){
+			auto init = syntax_node[1].code_gen(context).get_rvalue();
+			context->alloc_var(init->getType(), static_cast<term_node&>(syntax_node[0]).data.attr->value, init);
+			return AST_result((Type*)nullptr);
+		}}
+	}},
+	{ "LocalRefDefine", {
+		{ "LocalRefDefine, Id InitExpr", [](gen_node& syntax_node, AST_context* context){
+			syntax_node[0].code_gen(context);
+			auto ptr = syntax_node[2].code_gen(context).get_lvalue();
+			context->add_ref(ptr, static_cast<term_node&>(syntax_node[1]).data.attr->value);
+			return AST_result();
+		}},
+		{ "ref Id InitExpr", [](gen_node& syntax_node, AST_context* context){
+			auto ptr = syntax_node[1].code_gen(context).get_lvalue();
+			context->add_ref(ptr, static_cast<term_node&>(syntax_node[0]).data.attr->value);
+			return AST_result();
 		}}
 	}},
 	{ "InitExpr", {
@@ -1153,7 +1217,7 @@ parser::init_rules mparse_rules =
 				context->function_param_name.resize(0);
 				auto type = syntax_node[0].code_gen(context).get_type();
 				auto name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
-				if (!type->isFunctionTy()) throw err("not function type");
+				if (!type->isFunctionTy()) throw err("target is not function type");
 				AST_method_context new_context(struct_context, static_cast<FunctionType*>(type), name, fnattr);
 				new_context.register_args();
 				syntax_node[3].code_gen(&new_context);
@@ -1182,6 +1246,7 @@ parser::init_rules mparse_rules =
 		{ "override", parser::attribute<is_override> }
 	}},
 	
+	// utils
 	{ "exprelem", {
 		{ "( Expr )", parser::forward },
 		{ "Id", parser::forward },

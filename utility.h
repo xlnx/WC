@@ -183,6 +183,19 @@ llvm::Type* get_binary_sync_type(llvm::Value* LHS, llvm::Value* RHS);
 llvm::Type* binary_sync_cast(llvm::Value*& LHS, llvm::Value*& RHS, llvm::Type* type = nullptr);
 
 enum ltype { integer, floating_point, function, array, pointer, wstruct, overload, void_pointer };
+using ltype_map_type = std::map<ltype, std::string>;
+using ltype_item = ltype_map_type::value_type;
+static ltype_map_type err_msg = 
+{
+	ltype_item(ltype::integer, "integer"),
+	ltype_item(ltype::floating_point, "floating point"),
+	ltype_item(ltype::function, "function pointer"),
+	ltype_item(ltype::array, "array"),
+	ltype_item(ltype::pointer, "pointer"),
+	ltype_item(ltype::wstruct, "class"),
+	ltype_item(ltype::overload, "overloaded functions"),
+	ltype_item(ltype::void_pointer, "generic pointer")
+};
 struct function_meta
 {
 	llvm::Function* ptr = nullptr;
@@ -206,8 +219,15 @@ const unsigned is_method = 1;
 const unsigned is_virtual = 2;
 const unsigned is_override = 4;
 
+template <typename T>
+	T concat(const T& s)
+		{ return s; }
+template <typename T, typename...Args>
+	T concat(const T& s, const Args&... args)
+		{ return s + ", " + concat(args...); }
+
 class AST_result
-{	
+{
 	void* value = nullptr;
 	unsigned attr = 0;
 public:
@@ -257,7 +277,7 @@ public:
 			std::pair<llvm::Value*, unsigned> result;
 			if (get_hp<false, 0, U...>(result)) return result;
 			if (get_hp<true, 0, U...>(result)) return result;
-			throw err("cannot get value among ");
+			throw err("cannot get value among " + concat(err_msg[U]...));
 		}
 	template <ltype...U>
 		llvm::Value* get_any_among() const
@@ -488,7 +508,9 @@ class AST_namespace
 	std::map<llvm::StructType*, AST_struct_context*> typed_namespace_map;
 	AST_namespace* parent_namespace = nullptr;
 protected:
-	enum mapped_value_type { is_none = 0, is_type, is_alloc, is_constant, is_overload_func };
+	enum mapped_value_type { is_none = 0, is_type, is_alloc,
+		is_ref,		// add when i need lambda
+		is_constant, is_overload_func };
 	std::map<std::string, std::pair<void*, mapped_value_type>> name_map;
 public:
 	AST_namespace(AST_namespace* p):
@@ -497,7 +519,7 @@ public:
 	virtual ~AST_namespace() = default;
 public:
 	void add_type(llvm::Type* type, const std::string& name);
-	void add_alloc(llvm::Value* alloc, const std::string& name);
+	void add_alloc(llvm::Value* alloc, const std::string& name, bool is_reference = false);
 	void add_constant(llvm::Value* constant, const std::string& name);
 	virtual void add_func(llvm::Function* func, const std::string& name, function_attr* fnattr = nullptr);
 	// get type
@@ -523,6 +545,9 @@ public:
 	{}
 public:
 	virtual void alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init) = 0;
+	virtual void add_ref(llvm::Value* alloc_ptr, const std::string& name) = 0;
+	AST_context* get_global_context()
+		{ return parent ? parent->get_global_context() : this; }
 	static llvm::BasicBlock* new_block(const std::string& block_name)
 		{ return llvm::BasicBlock::Create(llvm::getGlobalContext(), block_name); }
 };
@@ -660,6 +685,10 @@ public:
 		idx_lookup[name] = elems.size();
 		name_map[name].second = is_alloc;
 	}
+	void add_ref(llvm::Value* alloc_ptr, const std::string& name) override
+	{
+		/* TODO */
+	}
 	void finish_struct(const std::string& name)
 	{
 		sname = name;
@@ -737,6 +766,14 @@ public:
 			llvm::GlobalValue::ExternalLinkage, static_cast<llvm::Constant*>(init));
 		add_alloc(alloc, name);
 	}
+	void add_ref(llvm::Value* alloc_ptr, const std::string& name) override
+	{
+		if (name == "") throw err("cannot define a dummy reference");
+		if (!alloc_ptr->getType()->isPointerTy()) throw err("target allocation not a pointer");
+		auto alloc = new llvm::GlobalVariable(*lModule, alloc_ptr->getType(), false, 
+			llvm::GlobalValue::ExternalLinkage, static_cast<llvm::Constant*>(alloc_ptr));
+		add_alloc(alloc, name, true);
+	}
 };
 
 class AST_local_context: public AST_context
@@ -792,6 +829,16 @@ public:
 		}
 		if (init) lBuilder.CreateStore(init, alloc);
 		add_alloc(alloc, name);
+	}
+	void add_ref(llvm::Value* alloc_ptr, const std::string& name) override
+	{
+		if (name == "") throw err("cannot define a dummy reference");
+		if (!alloc_ptr->getType()->isPointerTy()) throw err("target allocation not a pointer");
+		lBuilder.SetInsertPoint(get_alloc_block());
+		auto alloc = lBuilder.CreateAlloca(alloc_ptr->getType());
+		activate();
+		lBuilder.CreateStore(alloc_ptr, alloc);
+		add_alloc(alloc, name, true);
 	}
 };
 
@@ -857,7 +904,7 @@ protected:
 	llvm::Function* get_local_function() override
 		{ return function; }
 public:
-	AST_function_context(AST_context* p, llvm::Function* F, const std::string& name, function_attr* fnattr = nullptr):
+	AST_function_context(AST_context* p, llvm::Function* F, const std::string& name = "", function_attr* fnattr = nullptr):
 		AST_local_context(p),
 		function(F),
 		fname(name),
@@ -865,7 +912,7 @@ public:
 		entry_block(block),
 		return_block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "return"))
 	{
-		p->add_func(F, name, fnattr);
+		if (name != "") p->add_func(F, name, fnattr);
 		F->getBasicBlockList().push_back(block);
 		if (F->getReturnType() != void_type)
 		{
@@ -898,6 +945,7 @@ public:
 	{
 		unsigned i = 0;
 		for (auto itr = function->arg_begin(); itr != function->arg_end(); ++itr, ++i)
+			if (parent->function_param_name[i] != "")
 		{
 			itr->setName(parent->function_param_name[i]);
 			alloc_var(itr->getType(), parent->function_param_name[i], itr);
@@ -923,6 +971,7 @@ public:
 		unsigned i = 0;
 		add_constant(function->arg_begin(), "this");
 		for (auto itr = function->arg_begin(); ++itr != function->arg_end(); ++i)
+			if (parent->function_param_name[i] != "")
 		{
 			itr->setName(parent->function_param_name[i]);
 			alloc_var(itr->getType(), parent->function_param_name[i], itr);
