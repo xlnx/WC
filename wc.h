@@ -25,9 +25,9 @@ lexer::init_rules mlex_rules =
 		{ "ptr", "ptr", {word, no_attr} },
 		{ "ref", "ref", {word, no_attr} },
 		{ "pointer", "pointer", {word, no_attr} },
-		{ "prv", "private", {word, no_attr} },
-		{ "pro", "protected", {word, no_attr} },
-		{ "pub", "public", {word, no_attr} },
+		{ "own", "own", {word, no_attr} },
+		{ "inh", "inh", {word, no_attr} },
+		{ "pub", "pub", {word, no_attr} },
 		{ "fn", "fn", {word, no_attr} },
 		{ "arr", "arr", {word, no_attr} },
 		{ "let", "let", {word, no_attr} },
@@ -1337,8 +1337,8 @@ parser::init_rules mparse_rules =
 		{ "override", parser::attribute<is_override> },
 	}},
 	{ "VisitAttr", {
-		{ "prv", parser::attribute<is_private> },
-		{ "pro", parser::attribute<is_protected> },
+		{ "own", parser::attribute<is_private> },
+		{ "inh", parser::attribute<is_protected> },
 		{ "pub", parser::attribute<is_public> },
 	}},
 
