@@ -59,22 +59,88 @@ llvm::Type* binary_sync_cast(llvm::Value*& LHS, llvm::Value*& RHS, llvm::Type* t
 	return LHS->getType();
 }
 
+llvm::Value* get_struct_member(llvm::Value* agg, unsigned idx)
+{
+	std::vector<llvm::Value*> idxs = { lBuilder.getInt64(0), lBuilder.getInt32(idx) };
+	return llvm::GetElementPtrInst::CreateInBounds(agg, idxs, "PMember", lBuilder.GetInsertBlock());
+}
+
+llvm::Constant* create_initializer_list(llvm::Type* type, init_vec* init)
+{
+	if (!type)
+	{
+		std::vector<llvm::Constant*> vec;
+		for (auto& item: *init)
+		{
+			if (item.flag == init_item::is_constant)
+			{
+				vec.push_back(reinterpret_cast<llvm::Constant*>(item.value));
+			}
+			else
+			{
+				vec.push_back(create_initializer_list(type, reinterpret_cast<init_vec*>(item.value)));
+			}
+			if (vec.back()->getType() != vec.front()->getType())
+				throw err("annoymous array element type conflicted");
+		}
+		delete init;
+		return llvm::ConstantArray::get(llvm::ArrayType::get(vec.front()->getType(), vec.size()), vec);
+	}
+	else
+	{
+		if (type->isArrayTy())
+		{
+			auto at = static_cast<llvm::ArrayType*>(type);
+			std::vector<llvm::Constant*> vec;
+			auto elem_ty = at->getElementType();
+			auto eitr = init->begin();
+			for (unsigned i = 0; i != at->getNumElements(); ++i, ++eitr)
+			{
+				if (eitr >= init->end()) throw err("not every member of " + type_names[type] + " is initialized");
+				else if (eitr->flag == init_item::is_constant)
+				{
+					vec.push_back(static_cast<llvm::Constant*>(
+						create_implicit_cast(reinterpret_cast<llvm::Constant*>(eitr->value), elem_ty)));
+				}
+				else
+				{
+					vec.push_back(create_initializer_list(elem_ty, reinterpret_cast<init_vec*>(eitr->value)));
+				}
+			}
+			delete init;
+			return llvm::ConstantArray::get(at, vec);
+		}
+		else if (type->isStructTy())
+		{
+			auto st = static_cast<llvm::StructType*>(type);
+			std::vector<llvm::Constant*> vec;
+			auto eitr = init->begin();
+			for (auto itr = st->element_begin(); itr != st->element_end(); ++itr, ++eitr)
+			{
+				if (eitr >= init->end()) throw err("not every member of " + type_names[type] + " is initialized");
+				else if (eitr->flag == init_item::is_constant)
+				{
+					vec.push_back(static_cast<llvm::Constant*>(
+						create_implicit_cast(reinterpret_cast<llvm::Constant*>(eitr->value), *itr)));
+				}
+				else
+				{
+					vec.push_back(create_initializer_list(*itr, reinterpret_cast<init_vec*>(eitr->value)));
+				}
+			}
+			delete init;
+			return llvm::ConstantStruct::get(st, vec);
+		}
+		else throw err("initializer list can only be assigned to aggregrate type");
+	}
+}
+
+
+
 llvm::Type* AST_result::get_type() const
 {
 	if (flag != is_type) throw err("invalid typename"); 
 	return reinterpret_cast<llvm::Type*>(value);
-}
-
-llvm::Value* AST_result::get_lvalue() const
-{
-	if (flag == is_rvalue) throw err("cannot take address of expression");
-	if (flag != is_lvalue) throw err("invalid lvalue expression");
-	return reinterpret_cast<llvm::Value*>(value);
-}
-
-llvm::Value* AST_result::get_rvalue() const
-{
-	return get_any_among<ltype::integer, ltype::floating_point, ltype::pointer, ltype::function>(); 
 }
 
 llvm::FunctionType* methodlify(llvm::FunctionType* type)

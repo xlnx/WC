@@ -327,12 +327,12 @@ lexer::init_rules parser::expr_gen(lexer::init_rules& lR, init_rules& iR, expr_i
 		{ s + "pkhp", {
 			{ s + "pkhp" + " " + del + " " + s, [](gen_node& syntax_node, AST_context* context){
 				auto p = syntax_node[0].code_gen(context).get_data<value_pack>();
-				p->push_back(syntax_node[1].code_gen(context).get_rvalue());
+				p->push_back(syntax_node[1].code_gen(context).get_as<ltype::rvalue>());
 				return AST_result(p);
 			}},
 			{ s, [](gen_node& syntax_node, AST_context* context){
 				auto p = new value_pack;
-				p->push_back(syntax_node[0].code_gen(context).get_rvalue());
+				p->push_back(syntax_node[0].code_gen(context).get_as<ltype::rvalue>());
 				return AST_result(p);
 			}}
 		}});

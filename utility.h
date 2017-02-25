@@ -178,11 +178,21 @@ cast_priority_map cast_priority =
 	priority_item(float_type, 3)
 };
 
+struct init_item
+{
+	void* value;
+	enum {is_constant, is_init_list} flag;
+};
+using init_vec = std::vector<init_item>;
+
 llvm::Value* create_implicit_cast(llvm::Value* value, llvm::Type* type);
 llvm::Type* get_binary_sync_type(llvm::Value* LHS, llvm::Value* RHS);
 llvm::Type* binary_sync_cast(llvm::Value*& LHS, llvm::Value*& RHS, llvm::Type* type = nullptr);
+llvm::Value* get_struct_member(llvm::Value* agg, unsigned idx);
+llvm::Constant* create_initializer_list(llvm::Type* type, init_vec* init);
 
-enum ltype { integer, floating_point, function, array, pointer, wstruct, overload, void_pointer };
+enum ltype { integer, floating_point, function, array, pointer, wstruct, overload, void_pointer,
+	init_list, rvalue, lvalue/*, type*/ };
 using ltype_map_type = std::map<ltype, std::string>;
 using ltype_item = ltype_map_type::value_type;
 static ltype_map_type err_msg = 
@@ -194,7 +204,11 @@ static ltype_map_type err_msg =
 	ltype_item(ltype::pointer, "pointer"),
 	ltype_item(ltype::wstruct, "class"),
 	ltype_item(ltype::overload, "overloaded functions"),
-	ltype_item(ltype::void_pointer, "generic pointer")
+	ltype_item(ltype::void_pointer, "generic pointer"),
+	ltype_item(ltype::init_list, "initializer list"),
+	ltype_item(ltype::rvalue, "rvalue"),
+	ltype_item(ltype::lvalue, "lvalue"),
+	//ltype_item(ltype::type, "typename"),
 };
 struct function_meta
 {
@@ -231,7 +245,7 @@ class AST_result
 	void* value = nullptr;
 	unsigned attr = 0;
 public:
-	enum result_type { is_none = 0, is_type, is_lvalue, is_rvalue, is_overload, is_custom, is_attr };
+	enum result_type { is_none = 0, is_type, is_lvalue, is_rvalue, is_overload, is_custom, is_attr, is_init_list };
 	using type_map_type = std::map<result_type, std::string>;
 	static type_map_type type_map;
 	result_type flag = is_none;
@@ -258,10 +272,14 @@ public:
 		attr(n),
 		flag(is_attr)
 	{}
+	explicit AST_result(init_vec* p):
+		value(p),
+		flag(is_init_list)
+	{}
 public:
 	llvm::Type* get_type() const;
-	llvm::Value* get_lvalue() const;
-	llvm::Value* get_rvalue() const;
+	//llvm::Value* get_lvalue() const;
+	//llvm::Value* get_rvalue() const;
 	unsigned get_attr() const
 		{ if (flag != is_attr) throw err("target is not attribute type"); return attr; }
 	
@@ -277,16 +295,21 @@ public:
 			std::pair<llvm::Value*, unsigned> result;
 			if (get_hp<false, 0, U...>(result)) return result;
 			if (get_hp<true, 0, U...>(result)) return result;
-			throw err("cannot get value among " + concat(err_msg[U]...));
+			throw err("cannot get value among " + concat(err_msg[U]...) + ", target is " + type_map[flag]);
 		}
 	template <ltype...U>
 		llvm::Value* get_any_among() const
-			{ return get_among<U...>().first; }
+		{
+			std::pair<llvm::Value*, unsigned> result;
+			if (get_hp<false, 0, U...>(result)) return result.first;
+			if (get_hp<true, 0, U...>(result)) return result.first;
+			return nullptr;
+		}
 	template <ltype T>
 		llvm::Value* get_as() const
 		{
 			if (auto result = get<T>()) return result;
-			throw err("cannot get value, target is " + type_map[flag]);
+			throw err("cannot get value as " + err_msg[T] + ", target is " + type_map[flag]);
 		}
 	template <ltype T>
 		llvm::Value* cast_to(llvm::Type* type) const
@@ -299,7 +322,8 @@ public:
 		llvm::Value* get() const;
 private:
 	template <ltype>
-		llvm::Value* get_casted() const;
+		llvm::Value* get_casted() const
+		{ return nullptr; }
 	template <bool casted, unsigned index, ltype T, ltype...U>
 		bool get_hp(std::pair<llvm::Value*, unsigned>& result) const
 		{
@@ -322,7 +346,9 @@ AST_result::type_map_type AST_result::type_map =
 	AST_result::type_map_type::value_type(is_lvalue, "lvalue"),
 	AST_result::type_map_type::value_type(is_rvalue, "rvalue"),
 	AST_result::type_map_type::value_type(is_overload, "overload"),
-	AST_result::type_map_type::value_type(is_custom, "custom")
+	AST_result::type_map_type::value_type(is_custom, "custom"),
+	AST_result::type_map_type::value_type(is_attr, "function attribute"),
+	AST_result::type_map_type::value_type(is_init_list, "initializer list"),
 };
 
 // GetType Spec
@@ -389,9 +415,6 @@ template <>
 			return ptr;
 		return nullptr;
 	}
-template <>
-	llvm::Value* AST_result::get_casted<ltype::array>() const
-		{ return nullptr; }
 	
 template <>
 	llvm::Value* AST_result::get<ltype::function>() const
@@ -443,9 +466,6 @@ template <>
 			return reinterpret_cast<llvm::Value*>(value);
 		return nullptr;
 	}
-template <>
-	llvm::Value* AST_result::get_casted<ltype::overload>() const
-		{ return nullptr; }
 	
 template <>
 	llvm::Value* AST_result::get<ltype::integer>() const
@@ -459,9 +479,6 @@ template <>
 		}
 		return nullptr;
 	}
-template <>
-	llvm::Value* AST_result::get_casted<ltype::integer>() const
-		{ return nullptr; }
 	
 template <>
 	llvm::Value* AST_result::get<ltype::floating_point>() const
@@ -475,9 +492,6 @@ template <>
 		}
 		return nullptr;
 	}
-template <>
-	llvm::Value* AST_result::get_casted<ltype::floating_point>() const
-		{ return nullptr; }
 		
 template <>
 	llvm::Value* AST_result::get<ltype::wstruct>() const
@@ -487,18 +501,34 @@ template <>
 		{	// cast lvalue to rvalue
 		case is_lvalue: if (static_cast<llvm::AllocaInst*>(ptr)->getAllocatedType()->isStructTy())
 			return ptr; break;
+		case is_rvalue: if (ptr->getType()->isStructTy()) return ptr; break;
 		}
 		return nullptr;
 	}
-template <>
-	llvm::Value* AST_result::get_casted<ltype::wstruct>() const
-		{ return nullptr; }
 		
-llvm::Value* get_struct_member(llvm::Value* agg, unsigned idx)
-{
-	std::vector<llvm::Value*> idxs = { lBuilder.getInt64(0), lBuilder.getInt32(idx) };
-	return llvm::GetElementPtrInst::CreateInBounds(agg, idxs, "PMember", lBuilder.GetInsertBlock());
-}
+template <>
+	llvm::Value* AST_result::get<ltype::init_list>() const
+	{
+		if (flag == is_init_list)
+			return reinterpret_cast<llvm::Value*>(value);
+		return nullptr;
+	}
+
+template <>
+	llvm::Value* AST_result::get<ltype::lvalue>() const
+	{
+		if (flag == is_lvalue) return reinterpret_cast<llvm::Value*>(value);
+		return nullptr;
+	}
+
+template <>
+	llvm::Value* AST_result::get<ltype::rvalue>() const
+	{
+		return get_any_among<ltype::integer, ltype::floating_point,
+			ltype::pointer, ltype::function, ltype::wstruct>(); 
+	}
+	
+
 
 class AST_namespace;
 class AST_struct_context;

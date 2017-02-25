@@ -1,35 +1,22 @@
+fn ()->int add
+{
+	let a = 0, b = 1.5;
+	let add = lambda(int x, int y)->int{
+		return x + y;
+	};
+	return add(a, b);
+}
+
 class A
 {
 	int a;
-	fn ()  -> int exec virtual
-	{
-		return a - 1;
-	}
-	fn () init
-	{
-		a = 10;
-	}
+	float b;
+	int c;
 };
 
-class B: A
+fn () test
 {
-	fn () -> int exec override
-	{
-		return a + 1;
-	}
-};
-
-fn () -> int sub
-{
-	A a;
-	a.init();
-	return a.exec();
-}
-
-fn () -> int add
-{
-	B b;
-	ptr B p = &b;
-	b.init();
-	return p->exec();
+	let a = [[1, 2, 3], [1, 3, 4]];
+	A c = [1, 2, 5.5];
+	a[0][0] += 100;
 }
