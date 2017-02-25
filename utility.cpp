@@ -312,7 +312,7 @@ AST_result AST_namespace::get_var(const std::string& name)
 	}
 }*/
 
-AST_result AST_namespace::get_id(const std::string& name, bool precise)
+AST_result AST_namespace::get_id(const std::string& name, bool precise, unsigned helper)
 {
 	switch (name_map[name].second)
 	{

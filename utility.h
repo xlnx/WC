@@ -65,7 +65,7 @@ public:
 		ln(T.ln),
 		col(T.col),
 		ptr(T.ptr)
-	{} 
+	{}
 	virtual AST_result code_gen(AST_context* context) = 0;
 	void append_child(AST* p)
 		{ sub.push_back(p); }
@@ -95,7 +95,7 @@ struct err:std::logic_error
 		col(T.col),
 		ptr(T.ptr)
 	{}
-	err(const std::string& s): 
+	err(const std::string& s):
 		std::logic_error(s),
 		ln(cur_node?cur_node->ln:0),
 		col(cur_node?cur_node->col:0),
@@ -129,7 +129,7 @@ auto bool_type = lBuilder.getInt1Ty();
 
 using type_name_lookup = std::map<llvm::Type*, std::string>;
 using type_item = type_name_lookup::value_type;
-type_name_lookup type_names = 
+type_name_lookup type_names =
 {
 	type_item(void_type, "void"),
 	type_item(void_ptr_type, "ptr"),
@@ -196,7 +196,7 @@ enum ltype { integer, floating_point, function, array, pointer, wstruct, overloa
 	init_list, rvalue, lvalue/*, type*/ };
 using ltype_map_type = std::map<ltype, std::string>;
 using ltype_item = ltype_map_type::value_type;
-static ltype_map_type err_msg = 
+static ltype_map_type err_msg =
 {
 	ltype_item(ltype::integer, "integer"),
 	ltype_item(ltype::floating_point, "floating point"),
@@ -234,6 +234,13 @@ const unsigned is_method = 1;
 const unsigned is_virtual = 2;
 const unsigned is_override = 4;
 
+const unsigned is_this = 4;
+const unsigned is_private = 0;		// 00
+const unsigned is_protected = 1;	// 10
+const unsigned is_public = 3;		// 11
+const unsigned is_inh_visible = 1 | is_this;		//
+const unsigned is_out_visible = 2;
+
 template <typename T>
 	T concat(const T& s)
 		{ return s; }
@@ -267,7 +274,7 @@ public:
 	{}
 	explicit AST_result(void* p):
 		value(p),
-		flag(is_custom) 
+		flag(is_custom)
 	{}
 	explicit AST_result(unsigned n):
 		attr(n),
@@ -283,7 +290,7 @@ public:
 	//llvm::Value* get_rvalue() const;
 	unsigned get_attr() const
 		{ if (flag != is_attr) throw err("target is not attribute type"); return attr; }
-	
+
 	template <typename T>
 		T* get_data() const
 		{
@@ -355,7 +362,7 @@ AST_result::type_map_type AST_result::type_map =
 // GetType Spec
 template <>
 	llvm::Value* AST_result::get<ltype::pointer>() const
-	{	
+	{
 		auto ptr = reinterpret_cast<llvm::Value*>(value);
 		switch (flag)
 		{	// cast lvalue to rvalue
@@ -384,10 +391,10 @@ template <>
 		}
 		return nullptr;
 	}
-	
+
 template <>
 	llvm::Value* AST_result::get<ltype::void_pointer>() const
-	{	
+	{
 		auto ptr = reinterpret_cast<llvm::Value*>(value);
 		switch (flag)
 		{	// cast lvalue to rvalue
@@ -407,16 +414,16 @@ template <>
 		if (ptr) return new llvm::BitCastInst(ptr, void_ptr_type, "BitCast", lBuilder.GetInsertBlock());
 		return nullptr;
 	}
-	
+
 template <>
 	llvm::Value* AST_result::get<ltype::array>() const
 	{
 		auto ptr = reinterpret_cast<llvm::Value*>(value);
-		if (flag == is_lvalue && static_cast<llvm::AllocaInst*>(ptr)->getAllocatedType()->isArrayTy()) 
+		if (flag == is_lvalue && static_cast<llvm::AllocaInst*>(ptr)->getAllocatedType()->isArrayTy())
 			return ptr;
 		return nullptr;
 	}
-	
+
 template <>
 	llvm::Value* AST_result::get<ltype::function>() const
 	{
@@ -448,7 +455,7 @@ template <>
 		llvm::Type* type;
 		switch (flag)
 		{	// cast lvalue to rvalue
-		case is_lvalue: 
+		case is_lvalue:
 			type = static_cast<llvm::AllocaInst*>(ptr)->getAllocatedType();
 			if (type->isPointerTy() && static_cast<llvm::PointerType*>(type)->getElementType()->isFunctionTy())
 				return lBuilder.CreateLoad(ptr, "Load"); break;
@@ -459,7 +466,7 @@ template <>
 		}
 		return nullptr;
 	}
-	
+
 template <>
 	llvm::Value* AST_result::get<ltype::overload>() const
 	{
@@ -467,7 +474,7 @@ template <>
 			return reinterpret_cast<llvm::Value*>(value);
 		return nullptr;
 	}
-	
+
 template <>
 	llvm::Value* AST_result::get<ltype::integer>() const
 	{
@@ -480,7 +487,7 @@ template <>
 		}
 		return nullptr;
 	}
-	
+
 template <>
 	llvm::Value* AST_result::get<ltype::floating_point>() const
 	{
@@ -493,7 +500,7 @@ template <>
 		}
 		return nullptr;
 	}
-		
+
 template <>
 	llvm::Value* AST_result::get<ltype::wstruct>() const
 	{
@@ -506,7 +513,7 @@ template <>
 		}
 		return nullptr;
 	}
-		
+
 template <>
 	llvm::Value* AST_result::get<ltype::init_list>() const
 	{
@@ -526,9 +533,9 @@ template <>
 	llvm::Value* AST_result::get<ltype::rvalue>() const
 	{
 		return get_any_among<ltype::integer, ltype::floating_point,
-			ltype::pointer, ltype::function, ltype::wstruct, void_pointer>(); 
+			ltype::pointer, ltype::function, ltype::wstruct, void_pointer>();
 	}
-	
+
 
 
 class AST_namespace;
@@ -556,7 +563,7 @@ public:
 	// get type
 	AST_struct_context* get_namespace(llvm::StructType* p);
 	AST_struct_context* get_namespace(llvm::Value* p);
-	virtual AST_result get_id(const std::string& name, bool precise = false);
+	virtual AST_result get_id(const std::string& name, bool precise = false, unsigned helper = is_this | is_public);
 	virtual AST_result get_type(const std::string& name);
 	virtual AST_result get_var(const std::string& name);
 };
@@ -591,6 +598,7 @@ class AST_struct_context: public AST_context
 {
 	std::vector<llvm::Type*> elems;
 	std::map<std::string, unsigned> idx_lookup;
+	std::map<std::string, unsigned> visibility_lookup;
 	struct vmethod_data
 	{
 		llvm::Function* func;
@@ -602,6 +610,7 @@ class AST_struct_context: public AST_context
 protected:
 	std::vector<llvm::Constant*> vmt;
 public:
+	unsigned visibility_hwnd = is_public;
 	std::string sname;
 	std::stack<llvm::Value*> selected;
 	llvm::StructType* type = nullptr;
@@ -621,7 +630,7 @@ public:
 				new llvm::BitCastInst(
 					lBuilder.CreateLoad(
 						get_struct_member(obj, base ? 1 : 0), "LoadVPtr"
-					), vtable->getType(), "VMTCast", lBuilder.GetInsertBlock()	
+					), vtable->getType(), "VMTCast", lBuilder.GetInsertBlock()
 				), idx
 			), "VMethod"
 		);
@@ -720,6 +729,13 @@ public:
 	{
 		/* TODO */
 	}
+	void set_name_visibility(const std::string& name, unsigned visit_attr) {
+		if (!name_map[name].second)
+		{
+			throw err("cannot set visibility for undefined identifier");
+		}
+		visibility_lookup[name] = visit_attr | is_this;
+	}
 	void finish_struct(const std::string& name)
 	{
 		sname = name;
@@ -742,8 +758,21 @@ public:
 		parent->typed_namespace_map[type] = this;
 		type_names[type] = name;
 	}
-	AST_result get_id(const std::string& name, bool precise = false) override
+	AST_result get_id(const std::string& name, bool precise = false, unsigned visibility = is_this | is_public)
 	{
+		if (name_map[name].second != is_none)
+		{	// check for visibility
+			if (precise)
+			{
+				if (!(visibility_lookup[name] & visibility & is_out_visible))
+			 		throw err("identifier " + name + " is invisible in this scope");
+			}
+			else
+			{
+				if (!(visibility_lookup[name] & visibility & is_inh_visible))
+			 		throw err("identifier " + name + " is invisible in this scope");
+			}
+		}
 		switch (name_map[name].second)
 		{
 		case is_type: return get_type(name);
@@ -756,11 +785,13 @@ public:
 		case is_constant: return AST_result(reinterpret_cast<llvm::Value*>(name_map[name].first), false);
 		case is_none: if (base){
 			if (!selected.empty()) base->selected.push(get_struct_member(selected.top(), 0));
-			auto res = base->get_id(name);
+			if (!precise && visibility & is_this) visibility &= ~is_this;
+			else visibility &= visibility_hwnd;
+			auto res = base->get_id(name, precise, visibility);
 			if (!selected.empty()) base->selected.pop();
 			return res;
 		}
-		if (parent_namespace && !precise) return parent_namespace->get_id(name);
+		if (parent_namespace && !precise) return parent_namespace->get_id(name, precise);
 		else throw err("undefined identifier " + name + " in namespace: " + sname);
 		}
 	}
@@ -793,7 +824,7 @@ public:
 		if (type->isFunctionTy()) throw err("cannot create unimplemented function in local context");
 		if (type->isStructTy())
 			throw err("cannot define a global object, ctor required");
-		auto alloc = new llvm::GlobalVariable(*lModule, type, false, 
+		auto alloc = new llvm::GlobalVariable(*lModule, type, false,
 			llvm::GlobalValue::ExternalLinkage, static_cast<llvm::Constant*>(init));
 		add_alloc(alloc, name);
 	}
@@ -801,7 +832,7 @@ public:
 	{
 		if (name == "") throw err("cannot define a dummy reference");
 		if (!alloc_ptr->getType()->isPointerTy()) throw err("target allocation not a pointer");
-		auto alloc = new llvm::GlobalVariable(*lModule, alloc_ptr->getType(), false, 
+		auto alloc = new llvm::GlobalVariable(*lModule, alloc_ptr->getType(), false,
 			llvm::GlobalValue::ExternalLinkage, static_cast<llvm::Constant*>(alloc_ptr));
 		add_alloc(alloc, name, true);
 	}
@@ -1011,7 +1042,7 @@ public:
 	}
 private:
 	static llvm::Function* fn2method(llvm::StructType* st, llvm::FunctionType* ft, const std::string& name)
-	{	
+	{
 		ft = functionlify(ft, st);
 		return llvm::Function::Create(ft, llvm::Function::ExternalLinkage, type_names[st] + "." + name, lModule);
 	}
