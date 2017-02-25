@@ -15,7 +15,7 @@ void err::alert() const
 	}
 }
 
-llvm::Value* create_implicit_cast(llvm::Value* value, llvm::Type* type)
+static llvm::Value* try_create_implicit_cast(llvm::Value* value, llvm::Type* type)
 {
 	llvm::Type* cur_type = value->getType();
 	if (cur_type != type)
@@ -31,9 +31,21 @@ llvm::Value* create_implicit_cast(llvm::Value* value, llvm::Type* type)
 			return res.cast_to<ltype::pointer>(type);
 		}
 		if (type->isArrayTy()) return res.cast_to<ltype::array>(type);
-		throw err("unexpected typename in casting");
+		return nullptr;
 	}
 	return value;
+}
+
+llvm::Value* create_implicit_cast(llvm::Value* value, llvm::Type* type)
+{
+	if (auto cast = try_create_implicit_cast(value, type)) return cast;
+	throw err("cannot cast " + type_names[value->getType()] + " to " + type_names[type] + " implicitly");
+}
+
+llvm::Value* create_cast(llvm::Value* value, llvm::Type* type)
+{
+	if (auto cast = try_create_implicit_cast(value, type)) return cast;
+	throw err("cannot cast " + type_names[value->getType()] + " to " + type_names[type] + " explicitly");
 }
 
 llvm::Type* get_binary_sync_type(llvm::Value* LHS, llvm::Value* RHS)

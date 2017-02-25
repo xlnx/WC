@@ -186,6 +186,7 @@ struct init_item
 using init_vec = std::vector<init_item>;
 
 llvm::Value* create_implicit_cast(llvm::Value* value, llvm::Type* type);
+llvm::Value* create_cast(llvm::Value* value, llvm::Type* type);
 llvm::Type* get_binary_sync_type(llvm::Value* LHS, llvm::Value* RHS);
 llvm::Type* binary_sync_cast(llvm::Value*& LHS, llvm::Value*& RHS, llvm::Type* type = nullptr);
 llvm::Value* get_struct_member(llvm::Value* agg, unsigned idx);
@@ -286,7 +287,7 @@ public:
 	template <typename T>
 		T* get_data() const
 		{
-			if (flag != is_custom) throw err("invalid custom data, target is " + type_map[flag]);
+			if (flag != is_custom) throw err("expected custom data, target is " + type_map[flag]);
 			return reinterpret_cast<T*>(value);
 		}
 	template <ltype...U>
@@ -295,7 +296,7 @@ public:
 			std::pair<llvm::Value*, unsigned> result;
 			if (get_hp<false, 0, U...>(result)) return result;
 			if (get_hp<true, 0, U...>(result)) return result;
-			throw err("cannot get value among " + concat(err_msg[U]...) + ", target is " + type_map[flag]);
+			throw err("expected " + concat(err_msg[U]...) + ", target is " + type_map[flag]);
 		}
 	template <ltype...U>
 		llvm::Value* get_any_among() const
@@ -309,7 +310,7 @@ public:
 		llvm::Value* get_as() const
 		{
 			if (auto result = get<T>()) return result;
-			throw err("cannot get value as " + err_msg[T] + ", target is " + type_map[flag]);
+			throw err("expected " + err_msg[T] + ", target is " + type_map[flag]);
 		}
 	template <ltype T>
 		llvm::Value* cast_to(llvm::Type* type) const
@@ -525,7 +526,7 @@ template <>
 	llvm::Value* AST_result::get<ltype::rvalue>() const
 	{
 		return get_any_among<ltype::integer, ltype::floating_point,
-			ltype::pointer, ltype::function, ltype::wstruct>(); 
+			ltype::pointer, ltype::function, ltype::wstruct, void_pointer>(); 
 	}
 	
 

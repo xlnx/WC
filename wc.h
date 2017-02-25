@@ -27,6 +27,7 @@ lexer::init_rules mlex_rules =
 		{ "fn", "fn", {word, no_attr} },
 		{ "arr", "arr", {word, no_attr} },
 		{ "let", "let", {word, no_attr} },
+		{ "as", "as", {word, no_attr} },
 		{ "lambda", "lambda", {word, no_attr} },
 		{ "virtual", "virtual", {word, no_attr} },
 		{ "override", "override", {word, no_attr} },
@@ -279,6 +280,13 @@ parser::expr_init_rules mexpr_rules =
 			PN->addIncoming(then_value, then_block);
 			PN->addIncoming(else_value, else_block);
 			return AST_result(PN, false); 
+		}}
+	},
+	
+	{
+		{ "% as %Type", left_asl, [](gen_node& syntax_node, AST_context* context){
+			return AST_result(create_cast(syntax_node[0].code_gen(context).get_as<ltype::rvalue>(),
+				syntax_node[1].code_gen(context).get_type()), false);
 		}}
 	},
 	
