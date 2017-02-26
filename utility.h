@@ -707,6 +707,8 @@ public:
 					}
 				}
 			}
+			else for (auto& v: vmethod_list) if (v.is_override)
+					throw err("override method didn't override anything: " + v.name);
 			for (auto& v: vmethod_list) if (!v.is_override)
 			{
 				vmt.push_back(v.func);
@@ -722,6 +724,7 @@ public:
 	{
 		if (type->isFunctionTy()) throw err("cannot create unimplemented function in class context");
 		elems.push_back(type);
+		if (idx_lookup[name]) throw err("redeclared identifier " + name);
 		idx_lookup[name] = elems.size();
 		name_map[name].second = is_alloc;
 	}
