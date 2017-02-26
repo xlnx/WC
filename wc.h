@@ -41,7 +41,7 @@ lexer::init_rules mlex_rules =
 		{ "true", "true", {word} },
 		{ "false", "false", {word} },
 		//
-		{ "typedef", "typedef", {word, no_attr} },
+		{ "type", "type", {word, no_attr} },
 		{ "class", "class", {word, no_attr} },
 		//
 		{ "return", "return", {word} },
@@ -699,21 +699,6 @@ parser::expr_init_rules mexpr_rules =
 			return ret;
 		}},
 	},
-
-	{
-		{ "lambda %LambdaType { %Block }", left_asl, [](gen_node& syntax_node, AST_context* T){
-			auto context = T->get_global_context();
-			context->collect_param_name = true;
-			context->function_param_name.resize(0);
-			auto type = syntax_node[0].code_gen(context).get_type();
-			Function* F = Function::Create(static_cast<FunctionType*>(type), Function::ExternalLinkage, ".lambda", lModule);
-			AST_function_context new_context(context, F);
-			new_context.register_args();
-			syntax_node[1].code_gen(&new_context);
-			return AST_result(F, false);
-		}},
-		{ "[ %InitList ]", left_asl, parser::forward },
-	},
 };
 
 using function_params = vector<Type*>;
@@ -731,16 +716,20 @@ parser::init_rules mparse_rules =
 		{ "GlobalVarDefine;", parser::forward }
 	}},
 	{ "InitList", {
-		{ "InitList , ConstExpr", [](gen_node& syntax_node, AST_context* context){
+		{ "InitList , InitItem", [](gen_node& syntax_node, AST_context* context){
 			auto vec = reinterpret_cast<init_vec*>(syntax_node[0].code_gen(context).get_as<ltype::init_list>());
-			auto data = syntax_node[1].code_gen(context).get_among<ltype::rvalue, ltype::init_list>();
-			switch (data.second)
-			{
-			case 0: vec->push_back({ static_cast<Constant*>(data.first), init_item::is_constant}); break;
-			case 1: vec->push_back({ data.first, init_item::is_init_list}); break;
-			}
+			auto data = reinterpret_cast<init_vec*>(syntax_node[1].code_gen(context).get_as<ltype::init_list>());
+			for (auto& elem: *data) vec->push_back(elem);
 			return AST_result(vec);
 		}},
+		{ "InitItem", [](gen_node& syntax_node, AST_context* context){
+			auto vec = new init_vec;
+			auto data = reinterpret_cast<init_vec*>(syntax_node[0].code_gen(context).get_as<ltype::init_list>());
+			for (auto& elem: *data) vec->push_back(elem);
+			return AST_result(vec);
+		}}
+	}},
+	{ "InitItem", {
 		{ "ConstExpr", [](gen_node& syntax_node, AST_context* context){
 			auto vec = new init_vec;
 			auto data = syntax_node[0].code_gen(context).get_among<ltype::rvalue, ltype::init_list>();
@@ -750,7 +739,28 @@ parser::init_rules mparse_rules =
 			case 1: vec->push_back({ data.first, init_item::is_init_list}); break;
 			}
 			return AST_result(vec);
-		}}
+		}},
+		{ "ConstExpr : ConstExpr", [](gen_node& syntax_node, AST_context* context){
+			auto vec = new init_vec;
+			auto data = syntax_node[0].code_gen(context).get_among<ltype::rvalue, ltype::init_list>();
+			auto size = static_cast<ConstantInt*>(syntax_node[1].code_gen(context).get_as<ltype::integer>());
+			if (size->isNegative()) throw err("negative init list size");
+			//auto elem_type = context->current_type;
+			auto t = size->getZExtValue();
+			if (t == 0) throw err("zero init list size");
+			switch (data.second)
+			{
+			case 0:
+				while (t--)
+					vec->push_back({ static_cast<Constant*>(data.first), init_item::is_constant});
+				break;
+			case 1: vec->push_back({ data.first, init_item::is_init_list});
+				while (--t)
+					vec->push_back({ new init_vec(*reinterpret_cast<init_vec*>(data.first)), init_item::is_init_list});
+				break;
+			}
+			return AST_result(vec);
+		}},
 	}},
 	{ "CasesWithoutDefault", {
 		{ "case ConstExpr : StmtEmptyBlock CasesWithoutDefault", [](gen_node& syntax_node, AST_context* context){
@@ -1117,7 +1127,13 @@ parser::init_rules mparse_rules =
 
 	// Defination
 	{ "TypeDefine", {
-		{ "typedef Id = Type", [](gen_node& syntax_node, AST_context* context){
+		{ "TypeDefine, Id = Type", [](gen_node& syntax_node, AST_context* context){
+			syntax_node[0].code_gen(context);
+			auto type = syntax_node[2].code_gen(context).get_type();
+			context->add_type(type, static_cast<term_node&>(syntax_node[1]).data.attr->value);
+			return AST_result();
+		}},
+		{ "type Id = Type", [](gen_node& syntax_node, AST_context* context){
 			auto type = syntax_node[1].code_gen(context).get_type();
 			context->add_type(type, static_cast<term_node&>(syntax_node[0]).data.attr->value);
 			return AST_result();
@@ -1342,9 +1358,25 @@ parser::init_rules mparse_rules =
 		{ "pub", parser::attribute<is_public> },
 	}},
 
+
+	{ "Lambda", {
+		{ "lambda LambdaType { Block }", [](gen_node& syntax_node, AST_context* T){
+			auto context = T->get_global_context();
+			context->collect_param_name = true;
+			context->function_param_name.resize(0);
+			auto type = syntax_node[0].code_gen(context).get_type();
+			Function* F = Function::Create(static_cast<FunctionType*>(type), Function::ExternalLinkage, ".lambda", lModule);
+			AST_function_context new_context(context, F);
+			new_context.register_args();
+			syntax_node[1].code_gen(&new_context);
+			return AST_result(F, false);
+		}},
+	}},
 	// utils
 	{ "exprelem", {
 		{ "( Expr )", parser::forward },
+		{ "[ InitList ]", parser::forward },
+		{ "Lambda", parser::forward },
 		{ "Id", parser::forward },
 		{ "Dec", parser::forward },
 		{ "Hex", parser::forward },
@@ -1358,6 +1390,7 @@ parser::init_rules mparse_rules =
 	{ "constexprelem", {
 		{ "( ConstExpr )", parser::forward },
 		//{ "Id", parser::forward },
+		{ "[ InitList ]", parser::forward },
 		{ "Dec", parser::forward },
 		{ "Hex", parser::forward },
 		{ "Oct", parser::forward },
