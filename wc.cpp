@@ -11,11 +11,11 @@ const int object_format = 3;
 int execute_command(char* cmdline)
 {
 	STARTUPINFO si;
-	PROCESS_INFORMATION pi;  
+	PROCESS_INFORMATION pi;
 	ZeroMemory(&si, sizeof(si));
 	ZeroMemory(&pi, sizeof(pi));
 	si.cb = sizeof(si);
-	
+
 	if (!CreateProcess(
 		nullptr,
 		TEXT(cmdline),
@@ -31,9 +31,9 @@ int execute_command(char* cmdline)
 	WaitForSingleObject(pi.hProcess, INFINITE);
 	DWORD ret;
 	GetExitCodeProcess(pi.hProcess, &ret);
-	
+
 	CloseHandle(pi.hProcess);
-	CloseHandle(pi.hThread); 
+	CloseHandle(pi.hThread);
 	return ret;
 }
 
@@ -74,7 +74,7 @@ int main(int argc, char *argv[])
 		const int argc;
 		char** const argv;
 	} params(argc, argv);
-	
+
 	string input_file_name;
 	string output_file_name;
 	string opt_str;
@@ -92,7 +92,7 @@ int main(int argc, char *argv[])
 		callback("-O2", [&](){ opt_str = " -O2 "; }),
 		callback("-O3", [&](){ opt_str = " -O3 "; }),
 	};
-	
+
 	try
 	{
 		parser mparser(mlex_rules, mparse_rules, mexpr_rules);
@@ -123,7 +123,7 @@ int main(int argc, char *argv[])
 			}
 			output_file_name = change_suffix(input_file_name, suffix);
 		}
-		
+
 		ifstream is(input_file_name);
 		string src, dest;
 		getline(is, src, static_cast<char>(EOF));
@@ -133,7 +133,7 @@ int main(int argc, char *argv[])
 			mparser.parse(src.c_str());
 			raw_string_ostream los(dest);
 			lModule->print(los, nullptr);
-			
+
 			string tmp_file_name = dest_format == llvm_ir_format ? output_file_name : temp(output_file_name);
 			ofstream os(tmp_file_name);
 			os << dest;

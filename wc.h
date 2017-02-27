@@ -1,4 +1,3 @@
-
 #ifndef __W_COMPILER__HEADER_FILE
 #define __W_COMPILER__HEADER_FILE
 #include <iostream>
@@ -613,11 +612,12 @@ parser::expr_init_rules mexpr_rules =
 		}},
 		{ "% ( %$ )", left_asl, [](gen_node& syntax_node, AST_context* context){
 			auto params = syntax_node[1].code_gen(context).get_data<std::vector<Value*>>();
-			auto fdata = syntax_node[0].code_gen(context).get_among<ltype::overload, ltype::function>();
+			auto fdata = syntax_node[0].code_gen(context).get_among<
+				ltype::template_func, ltype::overload, ltype::function>();
 			llvm::Function* function = nullptr;
 			switch (fdata.second)
 			{
-			case 1: {
+			case 2: {
 				function = static_cast<llvm::Function*>(fdata.first);
 				auto function_proto = function->getFunctionType();
 				if (function_proto->getNumParams() != params->size())
@@ -626,7 +626,7 @@ parser::expr_init_rules mexpr_rules =
 					(*params)[i] = create_implicit_cast((*params)[i], function_proto->getParamType(i));
 				break;
 			}
-			case 0: {
+			case 1: {
 				func_sig sig;
 				for (auto arg: *params) sig.push_back(arg->getType());
 				auto map = reinterpret_cast<overload_map_type*>(fdata.first);
@@ -641,6 +641,11 @@ parser::expr_init_rules mexpr_rules =
 				case function_meta::is_function: function = fndata.ptr;
 				}
 				for (auto& f: *map) f.second.object = nullptr;
+				break;
+			}
+			case 0: {
+				auto& r = *reinterpret_cast<template_func_meta*>(fdata.first);
+				function = r.get_function(*params, context);
 			}
 			}
 
@@ -701,8 +706,6 @@ parser::expr_init_rules mexpr_rules =
 	},
 };
 
-using function_params = vector<Type*>;
-
 parser::init_rules mparse_rules =
 {	// Basic
 	{ "S", {
@@ -711,6 +714,7 @@ parser::init_rules mparse_rules =
 	}},
 	{ "GlobalItem", {
 		{ "Function", parser::forward },
+		{ "FunctionTemplate", parser::forward },
 		{ "TypeDefine;", parser::forward },
 		{ "StructDefine;", parser::forward },
 		{ "GlobalVarDefine;", parser::forward }
@@ -1094,7 +1098,9 @@ parser::init_rules mparse_rules =
 			context->collect_param_name = false;
 
 			auto type = syntax_node[0].code_gen(context).get_type();
-			if (type->isFunctionTy() || type->isVoidTy()) throw err("type " + type_names[type] + " is invalid argument type");
+			if (reinterpret_cast<unsigned long long&>(type) > 512)
+				if (type->isFunctionTy() || type->isVoidTy())
+					throw err("type " + type_names[type] + " is invalid argument type");
 			if (context->collect_param_name = bak_collect)
 				context->function_param_name.push_back(static_cast<term_node&>(syntax_node[1]).data.attr->value);
 			return AST_result(type);
@@ -1104,7 +1110,9 @@ parser::init_rules mparse_rules =
 			context->collect_param_name = false;
 
 			auto type = syntax_node[0].code_gen(context).get_type();
-			if (type->isFunctionTy() || type->isVoidTy()) throw err("type " + type_names[type] + " is invalid argument type");
+			if (reinterpret_cast<unsigned long long&>(type) > 512)
+				if (type->isFunctionTy() || type->isVoidTy())
+					throw err("type " + type_names[type] + " is invalid argument type");
 			if (context->collect_param_name = bak_collect)
 				context->function_param_name.push_back("");
 			return AST_result(type);
@@ -1124,7 +1132,71 @@ parser::init_rules mparse_rules =
 			return AST_result();
 		}}
 	}},
+	{ "TemplateFunction", {
+		{ "fn LambdaType Id { Block }", [](gen_node& syntax_node, AST_context* context){
+			if (!context) return AST_result(&static_cast<term_node&>(syntax_node[1]).data.attr->value);
 
+			context->collect_param_name = true;
+			context->function_param_name.resize(0);
+			auto type = syntax_node[0].code_gen(context).get_type();
+			auto name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
+			if (!type->isFunctionTy()) throw err("target is not function type");
+			Function* F = Function::Create(static_cast<FunctionType*>(type), Function::ExternalLinkage, name, lModule);
+			AST_function_context new_context(context, F, name);
+			new_context.register_args();
+			syntax_node[2].code_gen(&new_context);
+			return AST_result(reinterpret_cast<void*>(new_context.function));
+		}}
+	}},
+
+	{ "FunctionTemplate", {
+		{ "< TemplateParams > TemplateFunction", [](gen_node& syntax_node, AST_context* context){
+			auto ta = syntax_node[0].code_gen(context).get_data<template_args_type>();
+			AST_template_context template_context(context);
+			for (unsigned i = 0; i < ta->size(); ++i) if (!(*ta)[i].first)
+			{
+				unsigned long long idx = i;
+				template_context.add_type(reinterpret_cast<Type*&>(idx), (*ta)[i].second);
+			}
+			else throw err("non-typename template argument not supported");
+			auto params = static_cast<gen_node&>(
+				static_cast<gen_node&>(
+					syntax_node[1]
+				)[0]
+			)[0].code_gen(&template_context).get_data<function_params>();
+			context->add_template_func(ta, params, *syntax_node[1].code_gen(nullptr).get_data<std::string>(), syntax_node[1]);
+			delete ta;
+			delete params;
+			return AST_result();
+		}}
+	}},
+	{ "TemplateParams", {
+		{ "TemplateParams , TemplateParamItem", [](gen_node& syntax_node, AST_context* context){
+			auto vec = syntax_node[0].code_gen(context).get_data<template_args_type>();
+			auto data = syntax_node[1].code_gen(context).get_data<pair<Type*, std::string>>();
+			vec->push_back(*data);
+			delete data;
+			return AST_result(vec);
+		}},
+		{ "TemplateParamItem", [](gen_node& syntax_node, AST_context* context){
+			auto vec = new template_args_type;
+			auto data = syntax_node[0].code_gen(context).get_data<pair<Type*, std::string>>();
+			vec->push_back(*data);
+			delete data;
+			return AST_result(vec);
+		}},
+	}},
+	{ "TemplateParamItem", {
+		{ "type Id", [](gen_node& syntax_node, AST_context* context){
+			return AST_result(new pair<Type*, std::string>(nullptr,
+					static_cast<term_node&>(syntax_node[0]).data.attr->value));
+		}},
+		{ "Type Id", [](gen_node& syntax_node, AST_context* context){
+			return AST_result(new pair<Type*, std::string>(
+					syntax_node[0].code_gen(context).get_type(),
+					static_cast<term_node&>(syntax_node[1]).data.attr->value));
+		}},
+	}},
 	// Defination
 	{ "TypeDefine", {
 		{ "TypeDefine, Id = Type", [](gen_node& syntax_node, AST_context* context){

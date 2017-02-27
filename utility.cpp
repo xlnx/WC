@@ -320,6 +320,7 @@ AST_result AST_namespace::get_id(const std::string& name, bool precise, unsigned
 	case is_alloc: case is_ref: return get_var(name);
 	//case is_ref: return lBuilder.CreateLoad(get_var(name));
 	case is_overload_func: return AST_result(reinterpret_cast<overload_map_type*>(name_map[name].first));
+	case is_template_func: return AST_result(reinterpret_cast<template_func_meta*>(name_map[name].first));
 	case is_constant: return AST_result(reinterpret_cast<llvm::Value*>(name_map[name].first), false);
 	case is_none: if (parent_namespace && !precise) return parent_namespace->get_id(name);
 		else throw err("undefined identifier " + name + " in this namespace");
@@ -359,6 +360,42 @@ AST_function_context::~AST_function_context()
 	#ifdef WC_DEBUG
 	function->dump();
 	#endif
+}
+
+llvm::Function* template_func_meta::get_function(const std::vector<llvm::Value*>& params, AST_context* context)
+{
+	if (params.size() != template_func_params.size())
+		throw err("using template function with wrong argument number");
+	function_params deduct_type, real_type;
+	deduct_type.resize(template_args.size());
+	for (unsigned i = 0; i < params.size(); ++i)
+	{
+		if (params[i]->getType() != template_func_params[i])
+		{
+			unsigned idx = reinterpret_cast<unsigned long long&>(template_func_params[i]);
+			if (idx < template_args.size())
+			{	
+				if (!deduct_type[idx])
+				{
+					deduct_type[idx] = params[i]->getType();
+				}
+				else if (deduct_type[idx] != params[i]->getType())
+					throw err("deduction conflicted when refer to typename");
+			}
+			else throw err("invalid operand in calling template function");
+		}
+		real_type.push_back(params[i]->getType());
+	}
+	AST_template_context template_context(context);
+	for (unsigned idx = 0; idx != deduct_type.size(); ++idx)
+	{
+		if (!deduct_type[idx])
+			throw err("cannot deduct template function param type with the given params");
+		template_context.add_type(deduct_type[idx], template_args[idx].second);
+	}
+	if (rlist[real_type]) return rlist[real_type];
+	auto func = syntax_node.code_gen(&template_context).get_data<llvm::Function>();
+	return rlist[real_type] = func;
 }
 
 }

@@ -193,7 +193,7 @@ llvm::Value* get_struct_member(llvm::Value* agg, unsigned idx);
 llvm::Constant* create_initializer_list(llvm::Type* type, init_vec* init);
 
 enum ltype { integer, floating_point, function, array, pointer, wstruct, overload, void_pointer,
-	init_list, rvalue, lvalue/*, type*/ };
+	init_list, rvalue, lvalue, template_func/*, type*/ };
 using ltype_map_type = std::map<ltype, std::string>;
 using ltype_item = ltype_map_type::value_type;
 static ltype_map_type err_msg =
@@ -209,6 +209,7 @@ static ltype_map_type err_msg =
 	ltype_item(ltype::init_list, "initializer list"),
 	ltype_item(ltype::rvalue, "rvalue"),
 	ltype_item(ltype::lvalue, "lvalue"),
+	ltype_item(ltype::template_func, "function template"),
 	//ltype_item(ltype::type, "typename"),
 };
 struct function_meta
@@ -228,6 +229,24 @@ func_sig gen_sig(llvm::FunctionType* ft)
 	return result;
 }
 using overload_map_type = std::map<func_sig, function_meta>;
+
+using function_params = std::vector<llvm::Type*>;
+class AST_context;
+using template_args_type = std::vector<std::pair<llvm::Type*, std::string>>;
+class template_func_meta
+{
+	template_args_type template_args;
+	function_params template_func_params;
+	AST& syntax_node;
+	std::map<function_params, llvm::Function*> rlist;
+public:
+	template_func_meta(template_args_type* ta, function_params* params, AST& sn):
+		template_args(*ta),
+		template_func_params(*params),
+		syntax_node(sn)
+	{}
+	llvm::Function* get_function(const std::vector<llvm::Value*>& params, AST_context* context);
+};
 
 using function_attr = std::set<unsigned>;
 const unsigned is_method = 1;
@@ -253,7 +272,8 @@ class AST_result
 	void* value = nullptr;
 	unsigned attr = 0;
 public:
-	enum result_type { is_none = 0, is_type, is_lvalue, is_rvalue, is_overload, is_custom, is_attr, is_init_list };
+	enum result_type { is_none = 0, is_type, is_lvalue, is_rvalue,
+			is_overload, is_custom, is_attr, is_init_list, is_template_function };
 	using type_map_type = std::map<result_type, std::string>;
 	static type_map_type type_map;
 	result_type flag = is_none;
@@ -271,6 +291,10 @@ public:
 	explicit AST_result(overload_map_type* p):
 		value(p),
 		flag(is_overload)
+	{}
+	explicit AST_result(template_func_meta* p):
+		value(p),
+		flag(is_template_function)
 	{}
 	explicit AST_result(void* p):
 		value(p),
@@ -536,6 +560,14 @@ template <>
 			ltype::pointer, ltype::function, ltype::wstruct, void_pointer>();
 	}
 
+template <>
+	llvm::Value* AST_result::get<ltype::template_func>() const
+	{
+		if (flag == is_template_function) return reinterpret_cast<llvm::Value*>(value);
+		return nullptr;
+	}
+
+
 
 
 class AST_namespace;
@@ -548,7 +580,7 @@ class AST_namespace
 protected:
 	enum mapped_value_type { is_none = 0, is_type, is_alloc,
 		is_ref,		// add when i need lambda
-		is_constant, is_overload_func };
+		is_constant, is_overload_func, is_template_func };
 	std::map<std::string, std::pair<void*, mapped_value_type>> name_map;
 public:
 	AST_namespace(AST_namespace* p):
@@ -559,6 +591,10 @@ public:
 	void add_type(llvm::Type* type, const std::string& name);
 	void add_alloc(llvm::Value* alloc, const std::string& name, bool is_reference = false);
 	void add_constant(llvm::Value* constant, const std::string& name);
+	void add_template_func(template_args_type* ta, function_params* params, const std::string& name, AST& syntax_node) {
+		name_map[name].first = new template_func_meta(ta, params, syntax_node);
+		name_map[name].second = is_template_func;
+	}
 	virtual void add_func(llvm::Function* func, const std::string& name, function_attr* fnattr = nullptr);
 	// get type
 	AST_struct_context* get_namespace(llvm::StructType* p);
@@ -812,6 +848,18 @@ protected:
 	}
 };
 
+class AST_template_context: public AST_context
+{
+public:
+	AST_template_context(AST_context* p):
+		AST_context(p)
+	{}
+	void alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init = nullptr) override
+		{ throw err("unable to alloc variable within template context"); }
+	void add_ref(llvm::Value* alloc_ptr, const std::string& name) override
+		{ throw err("unable to add reference within template context"); }
+};
+
 class AST_global_context: public AST_context
 {
 public:
@@ -963,12 +1011,12 @@ class AST_function_context: public AST_local_context
 	llvm::Value* retval;
 protected:
 	std::string fname;
-	llvm::Function* function;
 	llvm::BasicBlock* get_alloc_block() const override
 		{ return alloc_block; }
 	llvm::Function* get_local_function() override
 		{ return function; }
 public:
+	llvm::Function* function;
 	AST_function_context(AST_context* p, llvm::Function* F, const std::string& name = "", function_attr* fnattr = nullptr):
 		AST_local_context(p),
 		function(F),
