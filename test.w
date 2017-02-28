@@ -9,9 +9,9 @@ fn ()->int add
 
 class A
 {
-	int a;
-	float b;
-	int c;
+	own int a;
+	own float b;
+	pub int c;
 };
 
 fn () test
