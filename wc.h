@@ -1142,7 +1142,8 @@ parser::init_rules mparse_rules =
 			auto name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
 			if (!type->isFunctionTy()) throw err("target is not function type");
 			Function* F = Function::Create(static_cast<FunctionType*>(type), Function::ExternalLinkage, name, lModule);
-			AST_function_context new_context(context, F, name);
+			AST_function_context new_context(context, F);
+			*static_cast<AST_template_context*>(context)->func_ptr = new_context.function;
 			new_context.register_args();
 			syntax_node[2].code_gen(&new_context);
 			return AST_result(reinterpret_cast<void*>(new_context.function));

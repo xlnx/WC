@@ -851,6 +851,7 @@ protected:
 class AST_template_context: public AST_context
 {
 public:
+	llvm::Function** func_ptr = nullptr;
 	AST_template_context(AST_context* p):
 		AST_context(p)
 	{}
@@ -858,6 +859,8 @@ public:
 		{ throw err("unable to alloc variable within template context"); }
 	void add_ref(llvm::Value* alloc_ptr, const std::string& name) override
 		{ throw err("unable to add reference within template context"); }
+	void set_temporary_func(llvm::Function*& func_storage)
+		{ func_ptr = &func_storage; }
 };
 
 class AST_global_context: public AST_context
@@ -889,26 +892,26 @@ public:
 	}
 };
 
-class AST_local_context: public AST_context
+class AST_basic_local_context: public AST_context
 {
 protected:
-	llvm::BasicBlock* block;
 	virtual llvm::BasicBlock* get_alloc_block() const
-		{ return static_cast<AST_local_context*>(parent)->get_alloc_block(); }
+		{ return static_cast<AST_basic_local_context*>(parent)->get_alloc_block(); }
 	virtual llvm::Function* get_local_function()
-		{ return static_cast<AST_local_context*>(parent)->get_local_function(); }
+		{ return static_cast<AST_basic_local_context*>(parent)->get_local_function(); }
 protected:
-	AST_local_context(AST_context* p):
+	AST_basic_local_context(AST_context* p):
 		AST_context(p),
 		block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "entry"))
 	{ activate(); }
 public:
-	AST_local_context(AST_local_context* p):
+	llvm::BasicBlock* block;
+	AST_basic_local_context(AST_basic_local_context* p):
 		AST_context(p),
 		block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "block"))
 	{ p->make_br(block); set_block(block); }
-	virtual ~AST_local_context() override
-		{ static_cast<AST_local_context*>(parent)->block = block; }
+	virtual ~AST_basic_local_context() override
+	{}
 public:
 	void activate()
 		{ lBuilder.SetInsertPoint(block); }
@@ -921,11 +924,11 @@ public:
 	void make_br(llvm::BasicBlock* b)
 		{ lBuilder.CreateBr(b); }
 	virtual void make_break()
-		{ static_cast<AST_local_context*>(parent)->make_break(); }
+		{ static_cast<AST_basic_local_context*>(parent)->make_break(); }
 	virtual void make_continue()
-		{ static_cast<AST_local_context*>(parent)->make_continue(); }
+		{ static_cast<AST_basic_local_context*>(parent)->make_continue(); }
 	virtual void make_return(llvm::Value* ret = nullptr)
-		{ static_cast<AST_local_context*>(parent)->make_return(ret); }
+		{ static_cast<AST_basic_local_context*>(parent)->make_return(ret); }
 	void alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init) override
 	{
 		if (name == "") throw err("cannot alloc a dummy variable");
@@ -953,6 +956,20 @@ public:
 		lBuilder.CreateStore(alloc_ptr, alloc);
 		add_alloc(alloc, name, true);
 	}
+};
+
+class AST_local_context: public AST_basic_local_context
+{
+protected:
+	AST_local_context(AST_context* p):
+		AST_basic_local_context(p)
+	{}
+public:
+	AST_local_context(AST_basic_local_context* p):
+		AST_basic_local_context(p)
+	{}
+	virtual ~AST_local_context() override
+		{ static_cast<AST_basic_local_context*>(parent)->block = block; }
 };
 
 class AST_loop_context: public AST_local_context
@@ -1003,11 +1020,12 @@ public:
 		{ make_br(switch_end); }
 };
 
-class AST_function_context: public AST_local_context
+class AST_function_context: public AST_basic_local_context
 {
 	llvm::BasicBlock* alloc_block;
 	llvm::BasicBlock* entry_block;
 	llvm::BasicBlock* return_block;
+	llvm::BasicBlock* old_block;
 	llvm::Value* retval;
 protected:
 	std::string fname;
@@ -1018,7 +1036,7 @@ protected:
 public:
 	llvm::Function* function;
 	AST_function_context(AST_context* p, llvm::Function* F, const std::string& name = "", function_attr* fnattr = nullptr):
-		AST_local_context(p),
+		AST_basic_local_context((old_block = lBuilder.GetInsertBlock(), p)),
 		function(F),
 		fname(name),
 		alloc_block(llvm::BasicBlock::Create(llvm::getGlobalContext(), "alloc", F)),

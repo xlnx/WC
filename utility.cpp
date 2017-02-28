@@ -151,7 +151,7 @@ llvm::Constant* create_initializer_list(llvm::Type* type, init_vec* init)
 
 llvm::Type* AST_result::get_type() const
 {
-	if (flag != is_type) throw err("invalid typename"); 
+	if (flag != is_type) throw err("invalid typename");
 	return reinterpret_cast<llvm::Type*>(value);
 }
 
@@ -192,7 +192,7 @@ void AST_namespace::add_alloc(llvm::Value* alloc, const std::string& name, bool 
 	case is_alloc: throw err("redefined variable: " + name);
 	default: throw err("name conflicted: " + name);
 	case is_none: name_map[name].second = is_reference ? is_ref : is_alloc;
-		name_map[name].first = alloc; alloc->setName(name); 
+		name_map[name].first = alloc; alloc->setName(name);
 	}
 }
 
@@ -332,18 +332,18 @@ AST_function_context::~AST_function_context()
 {
 	lBuilder.SetInsertPoint(alloc_block);
 	lBuilder.CreateBr(entry_block);
-	
+
 	function->getBasicBlockList().push_back(return_block);
 	lBuilder.SetInsertPoint(block);
 	lBuilder.CreateBr(return_block);
-	
+
 	lBuilder.SetInsertPoint(return_block);
 	if (function->getReturnType() == void_type)
 		lBuilder.CreateRetVoid();
 	else
 		lBuilder.CreateRet(lBuilder.CreateLoad(retval, "retval_load"));
 	function->setCallingConv(llvm::CallingConv::C);
-	
+
 	llvm::AttributeSet function_attrs;
 	llvm::SmallVector<llvm::AttributeSet, 4> attrs;
 	llvm::AttributeSet PAS;
@@ -357,6 +357,7 @@ AST_function_context::~AST_function_context()
 	function_attrs = llvm::AttributeSet::get(lModule->getContext(), attrs);
 	function->setAttributes(function_attrs);
 	llvm::verifyFunction(*function);
+	lBuilder.SetInsertPoint(old_block);
 	#ifdef WC_DEBUG
 	function->dump();
 	#endif
@@ -374,7 +375,7 @@ llvm::Function* template_func_meta::get_function(const std::vector<llvm::Value*>
 		{
 			unsigned idx = reinterpret_cast<unsigned long long&>(template_func_params[i]);
 			if (idx < template_args.size())
-			{	
+			{
 				if (!deduct_type[idx])
 				{
 					deduct_type[idx] = params[i]->getType();
@@ -394,8 +395,8 @@ llvm::Function* template_func_meta::get_function(const std::vector<llvm::Value*>
 		template_context.add_type(deduct_type[idx], template_args[idx].second);
 	}
 	if (rlist[real_type]) return rlist[real_type];
-	auto func = syntax_node.code_gen(&template_context).get_data<llvm::Function>();
-	return rlist[real_type] = func;
+	template_context.set_temporary_func(rlist[real_type]);
+	return syntax_node.code_gen(&template_context).get_data<llvm::Function>();
 }
 
 }
