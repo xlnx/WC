@@ -75,13 +75,27 @@ protected:
 	// lexer
 	lexer lex;
 public:
+	using symbol_type = int;
+private:
+	std::stack<std::map<std::string, symbol_type>> symbol_lookup;
+public:
 	static const handler forward;
 	static const handler empty;
 	static const handler expand;
-	static const matching_callback enter_block;
-	static const matching_callback leave_block;
-	static const matching_callback register_type;
-	static const matching_callback register_template;
+
+	static const symbol_type is_type_symbol;
+	static const symbol_type is_template_symbol;
+
+	static void enter_block(parser* this_parser, AST& node)
+		{ this_parser->symbol_lookup.push(this_parser->symbol_lookup.top()); }
+	static void leave_block(parser* this_parser, AST& node)
+		{ this_parser->symbol_lookup.pop(); 
+			if (this_parser->symbol_lookup.empty()) throw err("error when parsing enclosed scope"); }
+	static void register_type(parser* this_parser, AST& node)
+		{ this_parser->symbol_lookup.top()[static_cast<term_node&>(node).data.attr->value] = is_type_symbol; }
+	static void register_template(parser* this_parser, AST& node)
+		{ this_parser->symbol_lookup.top()[static_cast<term_node&>(node).data.attr->value] = is_template_symbol; }
+		
 	template <unsigned attr>
 	static AST_result attribute(gen_node&, AST_context*)
 		{ return AST_result(attr); }
@@ -120,14 +134,8 @@ const parser::handler parser::expand = [](gen_node& T, AST_context* context)->AS
 	{ for (auto p: T.sub) p->code_gen(context); return AST_result(); };
 
 // parser callback
-const parser::matching_callback parser::enter_block = [](parser* this_parser, AST& node)
-	{ std::cerr << "enter block" << std::endl; };
-const parser::matching_callback parser::leave_block = [](parser* this_parser, AST& node)
-	{ std::cerr << "leave block" << std::endl; };
-const parser::matching_callback parser::register_type = [](parser* this_parser, AST& node)
-	{ std::cerr << "register type: " << static_cast<term_node&>(node).data.attr->value << std::endl; };
-const parser::matching_callback parser::register_template = [](parser* this_parser, AST& node)
-	{ std::cerr << "register template: " << static_cast<term_node&>(node).data.attr->value << std::endl; };
+const parser::symbol_type parser::is_type_symbol = 1;
+const parser::symbol_type parser::is_template_symbol = 2;
 	
 struct expr_gen_err: err
 {

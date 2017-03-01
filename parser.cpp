@@ -450,6 +450,11 @@ void parser::parse(pchar buffer)
 	std::stack<state> states;	// $ state bottom
 	states.push(0);
 	std::stack<AST*> signs;
+
+	while (!symbol_lookup.empty())
+		symbol_lookup.pop();			//reset symbols to global context
+	symbol_lookup.push(std::map<std::string, symbol_type>());
+
 	auto merge = [&](rule_id i)
 	{
 		auto* p = new gen_node(tokens.front(), rules[i]);
