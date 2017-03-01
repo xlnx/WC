@@ -827,6 +827,10 @@ parser::init_rules mparse_rules =
 			}
 			switch_context.set_block(switch_context.switch_end);
 			return AST_result();
+		},
+		{	//$ parser callback
+			{ 5, parser::enter_block },
+			{ 7, parser::leave_block }
 		}},
 		{ "while ( Expr ) Stmt finally Stmt", [](gen_node& syntax_node, AST_context* context){
 			AST_while_loop_context while_context(static_cast<AST_local_context*>(context));
@@ -951,6 +955,10 @@ parser::init_rules mparse_rules =
 			auto block = new_context.get_block();
 			syntax_node[0].code_gen(&new_context);
 			return AST_result(reinterpret_cast<void*>(block));
+		},
+		{	//$ parser callback
+			{ 1, parser::enter_block },
+			{ 3, parser::leave_block }
 		}}
 	}},
 	{ "Block", {
@@ -1130,6 +1138,10 @@ parser::init_rules mparse_rules =
 			new_context.register_args();
 			syntax_node[2].code_gen(&new_context);
 			return AST_result();
+		},
+		{	//$ parser callback
+			{ 3, parser::enter_block },
+			{ 5, parser::leave_block }
 		}}
 	}},
 	{ "TemplateFunction", {
@@ -1147,6 +1159,11 @@ parser::init_rules mparse_rules =
 			new_context.register_args();
 			syntax_node[2].code_gen(&new_context);
 			return AST_result(reinterpret_cast<void*>(new_context.function));
+		},
+		{	//$ parser callback
+			{ 3, parser::register_template },
+			{ 4, parser::enter_block },
+			{ 6, parser::leave_block }
 		}}
 	}},
 
@@ -1192,10 +1209,8 @@ parser::init_rules mparse_rules =
 			return AST_result(new pair<Type*, std::string>(nullptr,
 					static_cast<term_node&>(syntax_node[0]).data.attr->value));
 		},
-		{	// parser callback
-			{ 2, [](parser* this_parser, AST& node){
-				std::cerr << "parsing type: " << static_cast<term_node&>(node).data.attr->value << std::endl;
-			}}
+		{	//$ parser callback
+			{ 2, parser::register_type }
 		}},
 		{ "Type Id", [](gen_node& syntax_node, AST_context* context){
 			return AST_result(new pair<Type*, std::string>(
@@ -1211,20 +1226,16 @@ parser::init_rules mparse_rules =
 			context->add_type(type, static_cast<term_node&>(syntax_node[1]).data.attr->value);
 			return AST_result();
 		},
-		{	// parser callback
-			{ 3, [](parser* this_parser, AST& node){
-				std::cerr << "parsing type: " << static_cast<term_node&>(node).data.attr->value << std::endl;
-			}}
+		{	//$ parser callback
+			{ 3, parser::register_type }
 		}},
 		{ "type Id = Type", [](gen_node& syntax_node, AST_context* context){
 			auto type = syntax_node[1].code_gen(context).get_type();
 			context->add_type(type, static_cast<term_node&>(syntax_node[0]).data.attr->value);
 			return AST_result();
 		},
-		{	// parser callback
-			{ 2, [](parser* this_parser, AST& node){
-				std::cerr << "parsing type: " << static_cast<term_node&>(node).data.attr->value << std::endl;
-			}}
+		{	//$ parser callback
+			{ 2, parser::register_type }
 		}}
 	}},
 	{ "GlobalVarDefine", {
@@ -1364,6 +1375,10 @@ parser::init_rules mparse_rules =
 			struct_context->verify();
 
 			return AST_result();
+		},
+		{	//$ parser callback
+			{ 4, parser::enter_block },
+			{ 6, parser::leave_block }
 		}},
 	}},
 	{ "StructBase", {
@@ -1419,6 +1434,10 @@ parser::init_rules mparse_rules =
 				delete fnattr;
 			}
 			return AST_result();
+		},
+		{	//$ parser callback
+			{ 5, parser::enter_block },
+			{ 7, parser::leave_block }
 		}}
 	}},
 	{ "MethodAttr", {
@@ -1458,6 +1477,10 @@ parser::init_rules mparse_rules =
 			new_context.register_args();
 			syntax_node[1].code_gen(&new_context);
 			return AST_result(F, false);
+		},
+		{	//$ parser callback
+			{ 3, parser::enter_block },
+			{ 5, parser::leave_block }
 		}},
 	}},
 	// utils

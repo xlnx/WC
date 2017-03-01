@@ -78,6 +78,10 @@ public:
 	static const handler forward;
 	static const handler empty;
 	static const handler expand;
+	static const matching_callback enter_block;
+	static const matching_callback leave_block;
+	static const matching_callback register_type;
+	static const matching_callback register_template;
 	template <unsigned attr>
 	static AST_result attribute(gen_node&, AST_context*)
 		{ return AST_result(attr); }
@@ -107,11 +111,23 @@ struct gen_node: AST
 	}
 };
 
+// AST handler
 const parser::handler parser::forward = [](gen_node& T, AST_context* context)->AST_result
 	{ return T.sub.empty() ? AST_result() : T[0].code_gen(context); };
-const parser::handler parser::empty = [](gen_node&, AST_context*)->AST_result{ return AST_result(); };
+const parser::handler parser::empty = [](gen_node&, AST_context*)->AST_result
+	{ return AST_result(); };
 const parser::handler parser::expand = [](gen_node& T, AST_context* context)->AST_result
 	{ for (auto p: T.sub) p->code_gen(context); return AST_result(); };
+
+// parser callback
+const parser::matching_callback parser::enter_block = [](parser* this_parser, AST& node)
+	{ std::cerr << "enter block" << std::endl; };
+const parser::matching_callback parser::leave_block = [](parser* this_parser, AST& node)
+	{ std::cerr << "leave block" << std::endl; };
+const parser::matching_callback parser::register_type = [](parser* this_parser, AST& node)
+	{ std::cerr << "register type: " << static_cast<term_node&>(node).data.attr->value << std::endl; };
+const parser::matching_callback parser::register_template = [](parser* this_parser, AST& node)
+	{ std::cerr << "register template: " << static_cast<term_node&>(node).data.attr->value << std::endl; };
 	
 struct expr_gen_err: err
 {
