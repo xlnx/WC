@@ -16,6 +16,7 @@ using asl_option = enum { left_asl, right_asl };
 
 struct oper_node;
 
+class parser;
 class parser
 {
 	friend class lexer;
@@ -35,15 +36,23 @@ class parser
 public:
 	static const sign empty_sign;
 	using handler = std::function<AST_result(gen_node&, AST_context*)>;
+	using matching_callback = std::function<void(parser*, AST&)>;
 	struct rule
 	{
 		sign src;
 		std::vector<sign> signs;
 		int sub_count;
 		handler func;
+		std::vector<std::pair<int, matching_callback>> on_match;
+	};
+	struct init_rule_item
+	{
+		std::string first;
+		handler second;
+		std::vector<std::pair<int, matching_callback>> on_match;
 	};
 	// use a rules list to initialize the parser
-	using init_rules = std::vector<std::pair<std::string, std::vector<std::pair<std::string, handler>>>>;
+	using init_rules = std::vector<std::pair<std::string, std::vector<init_rule_item>>>;
 	using expr_init_rules = std::vector<std::vector<oper_node>>;
 public:
 	// no default ctor allowed
@@ -62,6 +71,7 @@ protected:
 	std::vector<rule> rules;
 	std::vector<std::map<sign, action>> ACTION;		// [state][sign]->action->rule_id
 	std::vector<std::map<sign, state>> GOTO;		// [state][sign]->state
+	std::map<state, matching_callback> matching_callback_map;
 	// lexer
 	lexer lex;
 public:

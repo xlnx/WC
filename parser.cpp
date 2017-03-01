@@ -40,7 +40,7 @@ parser::parser(lexer::init_rules& lR, init_rules& iR, expr_init_rules& eiR, std:
 	{
 		for (auto& g: p.second)
 		{
-			rule r = { p.first, {}, 0, g.second };	// if second == {} then it is empty
+			rule r = { p.first, {}, 0, g.second, g.on_match };	// if second == {} then it is empty
 			m_lexer.input(g.first.c_str());
 			token T;
 			while (T = m_lexer.next_token())
@@ -184,6 +184,18 @@ parser::parser(lexer::init_rules& lR, init_rules& iR, expr_init_rules& eiR, std:
 				}// else this is mergeable 
 			}
 		} while (gen_sub);
+		for (auto& v: I)		// foreach item in I
+		{
+			for (auto& call_back: rules[v.first].on_match)
+			{
+				if (call_back.first == v.second)
+					if (!matching_callback_map[closures.size()])
+				{
+					matching_callback_map[closures.size()] = call_back.second;
+				}
+				else throw err("cannot initialize parser because 'callback for matching state conflicted'");
+			}
+		}
 		closures.push_back(std::move(I));
 		GOTO.push_back(std::map<sign, state>());
 		ACTION.push_back(std::map<sign, action>());
@@ -452,6 +464,10 @@ void parser::parse(pchar buffer)
 		}
 		signs.push(p);
 		states.push(GOTO[states.top()][rules[i].src]);
+		if (matching_callback_map[states.top()])
+		{
+			matching_callback_map[states.top()](this, *signs.top());
+		}
 	};
 	do {
 		auto& sgn = tokens.front().name;
@@ -461,6 +477,10 @@ void parser::parse(pchar buffer)
 		case a_move_in:
 			states.push(GOTO[states.top()][sgn]);	// move into a new state
 			if (terms.count(sgn)) signs.push(new term_node(tokens.front()));
+			if (matching_callback_map[states.top()])
+			{
+				matching_callback_map[states.top()](this, *signs.top());
+			}
 			tokens.pop(); break;
 		case a_accept:
 			if (signs.size() == 1 && !tokens.front()) goto SUCCESS;		// accepted

@@ -1191,6 +1191,11 @@ parser::init_rules mparse_rules =
 		{ "type Id", [](gen_node& syntax_node, AST_context* context){
 			return AST_result(new pair<Type*, std::string>(nullptr,
 					static_cast<term_node&>(syntax_node[0]).data.attr->value));
+		},
+		{	// parser callback
+			{ 2, [](parser* this_parser, AST& node){
+				std::cerr << "parsing type: " << static_cast<term_node&>(node).data.attr->value << std::endl;
+			}}
 		}},
 		{ "Type Id", [](gen_node& syntax_node, AST_context* context){
 			return AST_result(new pair<Type*, std::string>(
@@ -1205,11 +1210,21 @@ parser::init_rules mparse_rules =
 			auto type = syntax_node[2].code_gen(context).get_type();
 			context->add_type(type, static_cast<term_node&>(syntax_node[1]).data.attr->value);
 			return AST_result();
+		},
+		{	// parser callback
+			{ 3, [](parser* this_parser, AST& node){
+				std::cerr << "parsing type: " << static_cast<term_node&>(node).data.attr->value << std::endl;
+			}}
 		}},
 		{ "type Id = Type", [](gen_node& syntax_node, AST_context* context){
 			auto type = syntax_node[1].code_gen(context).get_type();
 			context->add_type(type, static_cast<term_node&>(syntax_node[0]).data.attr->value);
 			return AST_result();
+		},
+		{	// parser callback
+			{ 2, [](parser* this_parser, AST& node){
+				std::cerr << "parsing type: " << static_cast<term_node&>(node).data.attr->value << std::endl;
+			}}
 		}}
 	}},
 	{ "GlobalVarDefine", {
