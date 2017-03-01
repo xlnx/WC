@@ -10,7 +10,10 @@ lexer_base::lexer_base(const init_rules& iR)
 		r.token_name = ir.token_name;
 		std::string suffix = ir.opts.count(word) ? "\\b" : "";
 		//std::cout << prefix + ir.mode + suffix << std::endl;
-		if (ir.opts.count(ignore_case))
+		if (ir.mode == "")
+			r.mode = std::regex("$^", std::regex::icase |		// never match
+				std::regex::nosubs | std::regex::optimize);
+		else if (ir.opts.count(ignore_case))
 			r.mode = std::regex(ir.mode + suffix, std::regex::icase |
 				std::regex::nosubs | std::regex::optimize);
 		else

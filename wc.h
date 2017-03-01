@@ -48,6 +48,8 @@ lexer::init_rules mlex_rules =
 		{ "continue", "continue", {word} },
 		// identifier
 		{ "Id", "[a-zA-Z_]\\w*", {word} },
+		{ "IdType", "", {word} },
+		{ "IdTemplate", "", {word} },
 		// number literal
 		{ "Float", "\\d+\\.\\d+", {word} },
 		{ "Scientific", "\\d+e-?\\d+", {word, ignore_case} },
@@ -612,12 +614,11 @@ parser::expr_init_rules mexpr_rules =
 		}},
 		{ "% ( %$ )", left_asl, [](gen_node& syntax_node, AST_context* context){
 			auto params = syntax_node[1].code_gen(context).get_data<std::vector<Value*>>();
-			auto fdata = syntax_node[0].code_gen(context).get_among<
-				ltype::template_func, ltype::overload, ltype::function>();
+			auto fdata = syntax_node[0].code_gen(context).get_among<ltype::overload, ltype::function>();
 			llvm::Function* function = nullptr;
 			switch (fdata.second)
 			{
-			case 2: {
+			case 1: {
 				function = static_cast<llvm::Function*>(fdata.first);
 				auto function_proto = function->getFunctionType();
 				if (function_proto->getNumParams() != params->size())
@@ -626,7 +627,7 @@ parser::expr_init_rules mexpr_rules =
 					(*params)[i] = create_implicit_cast((*params)[i], function_proto->getParamType(i));
 				break;
 			}
-			case 1: {
+			case 0: {
 				func_sig sig;
 				for (auto arg: *params) sig.push_back(arg->getType());
 				auto map = reinterpret_cast<overload_map_type*>(fdata.first);
@@ -642,10 +643,6 @@ parser::expr_init_rules mexpr_rules =
 				}
 				for (auto& f: *map) f.second.object = nullptr;
 				break;
-			}
-			case 0: {
-				auto& r = *reinterpret_cast<template_func_meta*>(fdata.first);
-				function = r.get_function(*params, context);
 			}
 			}
 
@@ -1072,7 +1069,7 @@ parser::init_rules mparse_rules =
 		{ "float", parser::forward },
 		{ "char", parser::forward },
 		{ "bool", parser::forward },
-		{ "Id", [](gen_node& syntax_node, AST_context* context){
+		{ "IdType", [](gen_node& syntax_node, AST_context* context){
 			return context->get_type(static_cast<term_node&>(syntax_node[0]).data.attr->value);
 		}}
 	}},
@@ -1166,6 +1163,18 @@ parser::init_rules mparse_rules =
 			{ 6, parser::leave_block }
 		}}
 	}},
+	{ "TemplateFunctionCall", {
+		{ "IdTemplate ( exprpk )", [](gen_node& syntax_node, AST_context* context){
+			auto params = syntax_node[1].code_gen(context).get_data<std::vector<Value*>>();
+			auto fdata = syntax_node[0].code_gen(context).get_as<ltype::template_func>();
+			llvm::Function* function = reinterpret_cast<template_func_meta*>(fdata)->get_function(*params, context);
+			auto call_inst = function->getReturnType() != void_type ? lBuilder.CreateCall(function, *params, "Call")
+				: lBuilder.CreateCall(function, *params);
+			delete params;
+			if (function->getReturnType() != void_type) return AST_result(call_inst, false);
+				else return AST_result();
+		}}
+	}},
 
 	{ "FunctionTemplate", {
 		{ "< TemplateParams > TemplateFunction", [](gen_node& syntax_node, AST_context* context){
@@ -1186,6 +1195,10 @@ parser::init_rules mparse_rules =
 			delete ta;
 			delete params;
 			return AST_result();
+		},
+		{
+			{ 1, parser::enter_block },
+			{ 4, parser::leave_block }
 		}}
 	}},
 	{ "TemplateParams", {
@@ -1486,6 +1499,7 @@ parser::init_rules mparse_rules =
 	// utils
 	{ "exprelem", {
 		{ "( Expr )", parser::forward },
+		{ "TemplateFunctionCall", parser::forward },
 		{ "[ InitList ]", parser::forward },
 		{ "Lambda", parser::forward },
 		{ "Id", parser::forward },
@@ -1511,6 +1525,14 @@ parser::init_rules mparse_rules =
 		{ "true", parser::forward },
 		{ "false", parser::forward },
 	}},
+};
+
+parser::reinterpret_list rep_list = 
+{
+	{ "Id", {
+		{ parser::is_type_symbol, "IdType" },
+		{ parser::is_template_symbol, "IdTemplate" }
+	}}
 };
 
 #endif

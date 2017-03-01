@@ -37,6 +37,7 @@ public:
 	static const sign empty_sign;
 	using handler = std::function<AST_result(gen_node&, AST_context*)>;
 	using matching_callback = std::function<void(parser*, AST&)>;
+	using symbol_type = int;
 	struct rule
 	{
 		sign src;
@@ -51,13 +52,19 @@ public:
 		handler second;
 		std::vector<std::pair<int, matching_callback>> on_match;
 	};
+	struct reinterpret_item
+	{
+		symbol_type stype;
+		std::string target;
+	};
 	// use a rules list to initialize the parser
 	using init_rules = std::vector<std::pair<std::string, std::vector<init_rule_item>>>;
 	using expr_init_rules = std::vector<std::vector<oper_node>>;
+	using reinterpret_list = std::vector<std::pair<std::string, std::vector<reinterpret_item>>>;
 public:
 	// no default ctor allowed
 	// init with rules and a start node (default "S")
-	parser(lexer::init_rules&, init_rules&, expr_init_rules&, std::string s = "S");
+	parser(lexer::init_rules&, init_rules&, expr_init_rules&, const reinterpret_list& = {}, std::string s = "S");
 	// derive reserved
 	virtual ~parser() = default;
 public:
@@ -74,10 +81,9 @@ protected:
 	std::map<state, matching_callback> matching_callback_map;
 	// lexer
 	lexer lex;
-public:
-	using symbol_type = int;
 private:
 	std::stack<std::map<std::string, symbol_type>> symbol_lookup;
+	std::map<std::string, std::map<symbol_type, std::string>> reinterpret_map;
 public:
 	static const handler forward;
 	static const handler empty;
@@ -94,7 +100,13 @@ public:
 	static void register_type(parser* this_parser, AST& node)
 		{ this_parser->symbol_lookup.top()[static_cast<term_node&>(node).data.attr->value] = is_type_symbol; }
 	static void register_template(parser* this_parser, AST& node)
-		{ this_parser->symbol_lookup.top()[static_cast<term_node&>(node).data.attr->value] = is_template_symbol; }
+		{
+			auto map = std::move(this_parser->symbol_lookup.top());
+			this_parser->symbol_lookup.pop();
+			this_parser->symbol_lookup.top()[static_cast<term_node&>(node).data.attr->value] = is_template_symbol;
+			this_parser->symbol_lookup.push(std::move(map));
+			this_parser->symbol_lookup.top()[static_cast<term_node&>(node).data.attr->value] = is_template_symbol;
+		}
 		
 	template <unsigned attr>
 	static AST_result attribute(gen_node&, AST_context*)

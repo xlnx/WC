@@ -1,7 +1,7 @@
 namespace lr_parser
 {
 // ctor
-parser::parser(lexer::init_rules& lR, init_rules& iR, expr_init_rules& eiR, std::string s):
+parser::parser(lexer::init_rules& lR, init_rules& iR, expr_init_rules& eiR, const reinterpret_list& rL, std::string s):
 	lex(expr_gen(lR, iR, eiR)), rules({{s + "__", {s}}})
 {	// use a lexer to parse initializer rules
 	lexer_base::init_rules m_lR;
@@ -29,7 +29,18 @@ parser::parser(lexer::init_rules& lR, init_rules& iR, expr_init_rules& eiR, std:
 		}
 		else
 		{
-			throw err("Generate rule redeclared: " + r.first);
+			throw err("generate rule redeclared: " + r.first);
+		}
+	}
+	for (auto& v: rL)
+	{
+		if (!terms.count(v.first))
+			throw err("undefined terminal node type: " + v.first);
+		for (auto& dest: v.second)
+		{
+			if (!terms.count(dest.target))
+				throw err("undefined terminal node type: " + dest.target);
+			reinterpret_map[v.first][dest.stype] = dest.target;
 		}
 	}
 	signs.insert(stack_bottom);	// stack empty
@@ -476,12 +487,19 @@ void parser::parse(pchar buffer)
 	};
 	do {
 		auto& sgn = tokens.front().name;
+		if (tokens.front().attr && symbol_lookup.top()[tokens.front().attr->value])
+		{
+			sgn = reinterpret_map[sgn][symbol_lookup.top()[tokens.front().attr->value]];
+		}
 		//std::cout << states.top() << " " << sgn << " " << ACTION[states.top()][sgn] <<std::endl;
 		switch (ACTION[states.top()][sgn])
 		{
 		case a_move_in:
 			states.push(GOTO[states.top()][sgn]);	// move into a new state
-			if (terms.count(sgn)) signs.push(new term_node(tokens.front()));
+			if (terms.count(sgn))
+			{
+				signs.push(new term_node(tokens.front()));
+			}
 			if (matching_callback_map[states.top()])
 			{
 				matching_callback_map[states.top()](this, *signs.top());

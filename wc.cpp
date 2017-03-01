@@ -95,7 +95,7 @@ int main(int argc, char *argv[])
 
 	try
 	{
-		parser mparser(mlex_rules, mparse_rules, mexpr_rules);
+		parser mparser(mlex_rules, mparse_rules, mexpr_rules, rep_list);
 		while (!params.empty())
 		{
 			auto& fcallback = option_callback[params.current()];
