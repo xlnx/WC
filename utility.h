@@ -147,24 +147,24 @@ using dest_item = cast_dest_lookup::value_type;
 cast_dest_lookup implicit_casts =
 {	// cast from int
 	dest_item(int_type, {
-		cast_item(float_type, [](llvm::Value* v){ return lBuilder.CreateFPToSI(v, int_type); } ),	// float->int
-		cast_item(char_type, [](llvm::Value* v){ return lBuilder.CreateSExt(v, int_type); } ),		// char->int
-		cast_item(bool_type, [](llvm::Value* v){ return lBuilder.CreateZExt(v, int_type); } ),		// bool->int
+		cast_item(float_type, [](llvm::Value* v){ return lBuilder.CreateFPToSI(v, int_type, "FPToSI"); } ),	// float->int
+		cast_item(char_type, [](llvm::Value* v){ return lBuilder.CreateSExt(v, int_type, "SExt"); } ),		// char->int
+		cast_item(bool_type, [](llvm::Value* v){ return lBuilder.CreateZExt(v, int_type, "ZExt"); } ),		// bool->int
 	}),
 	dest_item(char_type, {
-		cast_item(int_type, [](llvm::Value* v){ return lBuilder.CreateTrunc(v, char_type); } ),		// int->char
-		cast_item(float_type, [](llvm::Value* v){ return lBuilder.CreateFPToSI(v, char_type); } ),	// float->char
-		cast_item(bool_type, [](llvm::Value* v){ return lBuilder.CreateZExt(v, char_type); } ),		// bool->char
+		cast_item(int_type, [](llvm::Value* v){ return lBuilder.CreateTrunc(v, char_type, "Trunc"); } ),		// int->char
+		cast_item(float_type, [](llvm::Value* v){ return lBuilder.CreateFPToSI(v, char_type, "FPToSI"); } ),	// float->char
+		cast_item(bool_type, [](llvm::Value* v){ return lBuilder.CreateZExt(v, char_type, "ZExt"); } ),		// bool->char
 	}),
 	dest_item(bool_type, {
-		cast_item(int_type, [](llvm::Value* v){ return lBuilder.CreateICmpNE(v, llvm::ConstantInt::get(int_type, 0)); } ),
-		cast_item(float_type, [](llvm::Value* v){ return lBuilder.CreateFCmpONE(v, llvm::ConstantFP::get(float_type, 0) ); } ),
-		cast_item(char_type, [](llvm::Value* v){ return lBuilder.CreateICmpNE(v, llvm::ConstantInt::get(char_type, 0)); } ),
+		cast_item(int_type, [](llvm::Value* v){ return lBuilder.CreateICmpNE(v, llvm::ConstantInt::get(int_type, 0), "ICmpNE"); } ),
+		cast_item(float_type, [](llvm::Value* v){ return lBuilder.CreateFCmpONE(v, llvm::ConstantFP::get(float_type, 0), "FCmpONE"); } ),
+		cast_item(char_type, [](llvm::Value* v){ return lBuilder.CreateICmpNE(v, llvm::ConstantInt::get(char_type, 0), "ICmpNE"); } ),
 	}),
 	dest_item(float_type, {
-		cast_item(int_type, [](llvm::Value* v){ return lBuilder.CreateSIToFP(v, float_type); } ),
-		cast_item(bool_type, [](llvm::Value* v){ return lBuilder.CreateUIToFP(v, float_type); } ),
-		cast_item(char_type, [](llvm::Value* v){ return lBuilder.CreateSIToFP(v, float_type); } ),
+		cast_item(int_type, [](llvm::Value* v){ return lBuilder.CreateSIToFP(v, float_type, "SIToFP"); } ),
+		cast_item(bool_type, [](llvm::Value* v){ return lBuilder.CreateUIToFP(v, float_type, "UIToFP"); } ),
+		cast_item(char_type, [](llvm::Value* v){ return lBuilder.CreateSIToFP(v, float_type, "SIToFP"); } ),
 	})
 };
 
