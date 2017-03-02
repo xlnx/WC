@@ -250,9 +250,7 @@ AST_struct_context* AST_namespace::get_namespace(llvm::StructType* p)
 {
 	if (!p->isStructTy()) throw err("target not struct type");
 	if (auto ptr = typed_namespace_map[p])
-	{
 		return ptr;
-	}
 	else
 	{
 		if (!parent_namespace) throw err("target type not found in this namespace");
@@ -321,6 +319,7 @@ AST_result AST_namespace::get_id(const std::string& name, bool precise, unsigned
 	//case is_ref: return lBuilder.CreateLoad(get_var(name));
 	case is_overload_func: return AST_result(reinterpret_cast<overload_map_type*>(name_map[name].first));
 	case is_template_func: return AST_result(reinterpret_cast<template_func_meta*>(name_map[name].first));
+	case is_template_class: return AST_result(reinterpret_cast<template_class_meta*>(name_map[name].first));
 	case is_constant: return AST_result(reinterpret_cast<llvm::Value*>(name_map[name].first), false);
 	case is_none: if (parent_namespace && !precise) return parent_namespace->get_id(name);
 		else throw err("undefined identifier " + name + " in this namespace");
@@ -369,7 +368,7 @@ llvm::Function* template_func_meta::get_function(const std::vector<llvm::Value*>
 		throw err("using template function with wrong argument number");
 	function_params deduct_type, real_type;
 	deduct_type.resize(template_args.size());
-	for (unsigned i = 0; i < params.size(); ++i)
+	for (unsigned i = 0; i != params.size(); ++i)
 	{
 		if (params[i]->getType() != template_func_params[i])
 		{
@@ -397,6 +396,19 @@ llvm::Function* template_func_meta::get_function(const std::vector<llvm::Value*>
 	if (rlist[real_type]) return rlist[real_type];
 	template_context.set_temporary_func(rlist[real_type]);
 	return syntax_node.code_gen(&template_context).get_data<llvm::Function>();
+}
+
+llvm::StructType* template_class_meta::generate_class(const template_params& params, AST_context* context)
+{
+	if (params.size() != template_args.size())
+		throw err("instantializing template class with wrong template argument number");
+	AST_template_context template_context(context);
+	for (unsigned i = 0; i != params.size(); ++i)
+	{
+		template_context.add_type(params[i].get_type(), template_args[i].second);
+	}
+	if (rlist[params]) return rlist[params];
+	return syntax_node.code_gen(&template_context).get_data<llvm::StructType>();
 }
 
 }

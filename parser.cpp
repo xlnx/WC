@@ -485,11 +485,13 @@ void parser::parse(pchar buffer)
 			matching_callback_map[states.top()](this, *signs.top());
 		}
 	};
+	bool reinterpret_reset = true;
 	do {
 		auto& sgn = tokens.front().name;
-		if (tokens.front().attr && symbol_lookup.top()[tokens.front().attr->value])
+		if (reinterpret_reset && tokens.front().attr && symbol_lookup.top()[tokens.front().attr->value])
 		{
 			sgn = reinterpret_map[sgn][symbol_lookup.top()[tokens.front().attr->value]];
+			reinterpret_reset = false;
 		}
 		//std::cout << states.top() << " " << sgn << " " << ACTION[states.top()][sgn] <<std::endl;
 		switch (ACTION[states.top()][sgn])
@@ -504,7 +506,7 @@ void parser::parse(pchar buffer)
 			{
 				matching_callback_map[states.top()](this, *signs.top());
 			}
-			tokens.pop(); break;
+			tokens.pop(); reinterpret_reset = true; break;
 		case a_accept:
 			if (signs.size() == 1 && !tokens.front()) goto SUCCESS;		// accepted
 			else

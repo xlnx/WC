@@ -193,7 +193,7 @@ llvm::Value* get_struct_member(llvm::Value* agg, unsigned idx);
 llvm::Constant* create_initializer_list(llvm::Type* type, init_vec* init);
 
 enum ltype { integer, floating_point, function, array, pointer, wstruct, overload, void_pointer,
-	init_list, rvalue, lvalue, template_func/*, type*/ };
+	init_list, rvalue, lvalue, template_func, template_class/*, type*/ };
 using ltype_map_type = std::map<ltype, std::string>;
 using ltype_item = ltype_map_type::value_type;
 static ltype_map_type err_msg =
@@ -210,6 +210,7 @@ static ltype_map_type err_msg =
 	ltype_item(ltype::rvalue, "rvalue"),
 	ltype_item(ltype::lvalue, "lvalue"),
 	ltype_item(ltype::template_func, "function template"),
+	ltype_item(ltype::template_class, "class template"),
 	//ltype_item(ltype::type, "typename"),
 };
 struct function_meta
@@ -231,7 +232,39 @@ func_sig gen_sig(llvm::FunctionType* ft)
 using overload_map_type = std::map<func_sig, function_meta>;
 
 using function_params = std::vector<llvm::Type*>;
+class template_param_item
+{
+	void* value;
+	enum { is_constant_item, is_type_item } flag;
+public:
+	template_param_item(llvm::Constant* constant_init):
+		value(reinterpret_cast<void*>(constant_init)),
+		flag(is_constant_item)
+	{}
+	template_param_item(llvm::Type* type_init):
+		value(reinterpret_cast<void*>(type_init)),
+		flag(is_type_item)
+	{}
+public:
+	bool operator < (const template_param_item& other) const
+	{
+		return value < other.value;
+	}
+	llvm::Value* get_constant() const
+	{
+		if (flag != is_constant_item)
+			throw err("expected constant value but given typename");
+		return reinterpret_cast<llvm::Value*>(value);
+	}
+	llvm::Type* get_type() const
+	{
+		if (flag != is_type_item)
+			throw err("expected typename but given constant");
+		return reinterpret_cast<llvm::Type*>(value);
+	}
+};
 class AST_context;
+using template_params = std::vector<template_param_item>;
 using template_args_type = std::vector<std::pair<llvm::Type*, std::string>>;
 class template_func_meta
 {
@@ -246,6 +279,19 @@ public:
 		syntax_node(sn)
 	{}
 	llvm::Function* get_function(const std::vector<llvm::Value*>& params, AST_context* context);
+};
+
+class template_class_meta
+{
+	template_args_type template_args;
+	AST& syntax_node;
+	std::map<template_params, llvm::StructType*> rlist;
+public:
+	template_class_meta(template_args_type* ta, AST& sn):
+		template_args(*ta),
+		syntax_node(sn)
+	{}
+	llvm::StructType* generate_class(const template_params& params, AST_context* context);
 };
 
 using function_attr = std::set<unsigned>;
@@ -273,7 +319,7 @@ class AST_result
 	unsigned attr = 0;
 public:
 	enum result_type { is_none = 0, is_type, is_lvalue, is_rvalue,
-			is_overload, is_custom, is_attr, is_init_list, is_template_function };
+			is_overload, is_custom, is_attr, is_init_list, is_template_function, is_template_class };
 	using type_map_type = std::map<result_type, std::string>;
 	static type_map_type type_map;
 	result_type flag = is_none;
@@ -295,6 +341,10 @@ public:
 	explicit AST_result(template_func_meta* p):
 		value(p),
 		flag(is_template_function)
+	{}
+	explicit AST_result(template_class_meta* p):
+		value(p),
+		flag(is_template_class)
 	{}
 	explicit AST_result(void* p):
 		value(p),
@@ -566,21 +616,29 @@ template <>
 		if (flag == is_template_function) return reinterpret_cast<llvm::Value*>(value);
 		return nullptr;
 	}
+template <>
+	llvm::Value* AST_result::get<ltype::template_class>() const
+	{
+		if (flag == is_template_class) return reinterpret_cast<llvm::Value*>(value);
+		return nullptr;
+	}
 
 
 
 
 class AST_namespace;
 class AST_struct_context;
+class AST_template_class_context;
 class AST_namespace
 {
 	friend class AST_struct_context;
+	friend class AST_template_class_context;
 	std::map<llvm::StructType*, AST_struct_context*> typed_namespace_map;
 	AST_namespace* parent_namespace = nullptr;
 protected:
 	enum mapped_value_type { is_none = 0, is_type, is_alloc,
 		is_ref,		// add when i need lambda
-		is_constant, is_overload_func, is_template_func };
+		is_constant, is_overload_func, is_template_func, is_template_class };
 	std::map<std::string, std::pair<void*, mapped_value_type>> name_map;
 public:
 	AST_namespace(AST_namespace* p):
@@ -595,6 +653,10 @@ public:
 		name_map[name].first = new template_func_meta(ta, params, syntax_node);
 		name_map[name].second = is_template_func;
 	}
+	void add_template_class(template_args_type* ta, const std::string& name, AST& syntax_node) {
+		name_map[name].first = new template_class_meta(ta, syntax_node);
+		name_map[name].second = is_template_class;
+	}
 	virtual void add_func(llvm::Function* func, const std::string& name, function_attr* fnattr = nullptr);
 	// get type
 	AST_struct_context* get_namespace(llvm::StructType* p);
@@ -605,8 +667,10 @@ public:
 };
 
 class AST_context;
+class AST_template_class_context;
 class AST_context: public AST_namespace
 {
+	friend class AST_template_class_context;
 protected:
 	AST_context* parent;
 public:
@@ -632,9 +696,6 @@ llvm::FunctionType* functionlify(llvm::FunctionType* ft, llvm::StructType* st);
 class AST_struct_context;
 class AST_struct_context: public AST_context
 {
-	std::vector<llvm::Type*> elems;
-	std::map<std::string, unsigned> idx_lookup;
-	std::map<std::string, unsigned> visibility_lookup;
 	struct vmethod_data
 	{
 		llvm::Function* func;
@@ -644,6 +705,9 @@ class AST_struct_context: public AST_context
 	std::vector<vmethod_data> vmethod_list;
 	using inh_vec = std::vector<AST_struct_context*>;
 protected:
+	std::map<std::string, unsigned> idx_lookup;
+	std::map<std::string, unsigned> visibility_lookup;
+	std::vector<llvm::Type*> elems;
 	std::vector<llvm::Constant*> vmt;
 public:
 	unsigned visibility_hwnd = is_public;
@@ -775,7 +839,7 @@ public:
 		}
 		visibility_lookup[name] = visit_attr | is_this;
 	}
-	void finish_struct(const std::string& name)
+	virtual void finish_struct(const std::string& name)
 	{
 		sname = name;
 		if (is_vclass)
@@ -845,6 +909,35 @@ protected:
 		if (auto idx = idx_lookup[name])
 			return AST_result(get_struct_member(selected.top(), idx - 1), true);
 		throw err("class has no variable named " + name);
+	}
+};
+
+class AST_template_class_context: public AST_struct_context
+{
+public:
+	AST_template_class_context(AST_context* p, AST_struct_context* b = nullptr):
+		AST_struct_context(p, b)
+	{}
+	void finish_struct(const std::string& name) override
+	{
+		sname = name;
+		if (is_vclass)
+		{
+			elems.insert(elems.begin(), void_ptr_type);
+			for (auto&v : idx_lookup) ++v.second;
+		}
+		if (base)
+		{
+			elems.insert(elems.begin(), base->type);
+			for (auto& v: idx_lookup) ++v.second;
+		}
+		if (elems.empty())
+		{
+			elems.push_back(char_type);
+		}
+		type = llvm::StructType::create(elems, name);
+		parent->parent->typed_namespace_map[type] = this;
+		type_names[type] = name;
 	}
 };
 

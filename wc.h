@@ -710,10 +710,10 @@ parser::init_rules mparse_rules =
 		{ "", parser::empty }
 	}},
 	{ "GlobalItem", {
+		{ "Template", parser::forward },
 		{ "Function", parser::forward },
-		{ "FunctionTemplate", parser::forward },
+		{ "Class;", parser::forward },
 		{ "TypeDefine;", parser::forward },
-		{ "StructDefine;", parser::forward },
 		{ "GlobalVarDefine;", parser::forward }
 	}},
 	{ "InitList", {
@@ -1064,6 +1064,32 @@ parser::init_rules mparse_rules =
 		{ "-> Type", parser::forward },
 		{ "", [](gen_node&, AST_context*){ return AST_result(void_type); } }
 	}},
+	{ "TemplateArgumentPack", {
+		{ "TemplateArgumentPack , TemplateArgument", [](gen_node& syntax_node, AST_context* context){
+			auto vec = syntax_node[0].code_gen(context).get_data<template_params>();
+			auto data = syntax_node[1].code_gen(context).get_data<template_param_item>();
+			vec->push_back(std::move(*data));
+			delete data;
+			return AST_result(vec);
+		}},
+		{ "TemplateArgument", [](gen_node& syntax_node, AST_context* context){
+			auto vec = new template_params;
+			auto data = syntax_node[0].code_gen(context).get_data<template_param_item>();
+			vec->push_back(std::move(*data));
+			delete data;
+			return AST_result(vec);
+		}}
+	}},
+	{ "TemplateArgument", {
+		{ "Type", [](gen_node& syntax_node, AST_context* context){
+			return AST_result(new template_param_item(syntax_node[0].code_gen(context).get_type()));
+		}},
+		{ "constexpr", [](gen_node& syntax_node, AST_context* context){
+			return AST_result(new template_param_item(static_cast<Constant*>(
+				syntax_node[0].code_gen(context).get_as<ltype::rvalue>()
+			)));
+		}}
+	}},
 	{ "TypeElem", {
 		{ "int", parser::forward },
 		{ "float", parser::forward },
@@ -1071,6 +1097,14 @@ parser::init_rules mparse_rules =
 		{ "bool", parser::forward },
 		{ "IdType", [](gen_node& syntax_node, AST_context* context){
 			return context->get_type(static_cast<term_node&>(syntax_node[0]).data.attr->value);
+		}},
+		{ "IdTemplate < TemplateArgumentPack >", [](gen_node& syntax_node, AST_context* context){
+			auto vec = syntax_node[1].code_gen(context).get_data<template_params>();
+			auto ty = reinterpret_cast<template_class_meta*>(
+					syntax_node[0].code_gen(context).get_as<ltype::template_class>()
+				)->generate_class(*vec, context);
+			delete vec;
+			return AST_result(static_cast<Type*>(ty));
 		}}
 	}},
 	// Function
@@ -1141,10 +1175,10 @@ parser::init_rules mparse_rules =
 			{ 5, parser::leave_block }
 		}}
 	}},
+
+	// Template
 	{ "TemplateFunction", {
 		{ "fn LambdaType Id { Block }", [](gen_node& syntax_node, AST_context* context){
-			if (!context) return AST_result(&static_cast<term_node&>(syntax_node[1]).data.attr->value);
-
 			context->collect_param_name = true;
 			context->function_param_name.resize(0);
 			auto type = syntax_node[0].code_gen(context).get_type();
@@ -1163,24 +1197,65 @@ parser::init_rules mparse_rules =
 			{ 6, parser::leave_block }
 		}}
 	}},
-	{ "TemplateFunctionCall", {
-		{ "IdTemplate ( exprpk )", [](gen_node& syntax_node, AST_context* context){
-			auto params = syntax_node[1].code_gen(context).get_data<std::vector<Value*>>();
-			auto fdata = syntax_node[0].code_gen(context).get_as<ltype::template_func>();
-			llvm::Function* function = reinterpret_cast<template_func_meta*>(fdata)->get_function(*params, context);
-			auto call_inst = function->getReturnType() != void_type ? lBuilder.CreateCall(function, *params, "Call")
-				: lBuilder.CreateCall(function, *params);
-			delete params;
-			if (function->getReturnType() != void_type) return AST_result(call_inst, false);
-				else return AST_result();
-		}}
+	{ "TemplateClass", {
+		{ "class Id ClassBase { ClassInterface }", [](gen_node& syntax_node, AST_context* context){
+			Type* base = nullptr;
+			unsigned hwnd = is_public;
+			if (auto base_val = syntax_node[1].code_gen(context))
+			{
+				auto dat = base_val.get_data<pair<Type*, unsigned>>();
+				base = dat->first;
+				hwnd = dat->second;
+				delete dat;
+			}
+			AST_template_class_context* struct_context = new AST_template_class_context(context, !base ? nullptr :
+				context->get_namespace(static_cast<StructType*>(base)));
+			struct_context->visibility_hwnd = hwnd;
+
+			syntax_node[2].code_gen(struct_context);	// vtable
+			struct_context->verify_vmethod();
+
+			syntax_node[2].code_gen(struct_context);
+			struct_context->finish_struct(static_cast<term_node&>(syntax_node[0]).data.attr->value);
+
+			syntax_node[2].code_gen(struct_context);
+			struct_context->verify();
+
+			return AST_result(reinterpret_cast<void*>(struct_context->type));
+		},
+		{	//$ parser callback
+			{ 2, parser::register_template },
+			{ 4, parser::enter_block },
+			{ 6, parser::leave_block }
+		}},
 	}},
 
+	{ "Template", {
+		{ "TemplateItem", parser::forward, {
+			{ 0, parser::enter_block },
+			{ 1, parser::leave_block }
+		}}
+	}},
+	{ "TemplateItem", {
+		{ "ClassTemplate", parser::forward },
+		{ "FunctionTemplate", parser::forward }
+	}},
+	{ "ClassTemplate", {
+		{ "< TemplateParams > TemplateClass", [](gen_node& syntax_node, AST_context*context){
+			auto ta = syntax_node[0].code_gen(context).get_data<template_args_type>();
+			context->add_template_class(ta, static_cast<term_node&>(
+					static_cast<gen_node&>(syntax_node[1])[0]
+				).data.attr->value, syntax_node[1]);
+			delete ta;
+			return AST_result();
+		}}
+	}},
 	{ "FunctionTemplate", {
 		{ "< TemplateParams > TemplateFunction", [](gen_node& syntax_node, AST_context* context){
 			auto ta = syntax_node[0].code_gen(context).get_data<template_args_type>();
 			AST_template_context template_context(context);
-			for (unsigned i = 0; i < ta->size(); ++i) if (!(*ta)[i].first)
+			for (unsigned i = 0; i != ta->size(); ++i)
+				if (!(*ta)[i].first)		// if this template argument is typename
 			{
 				unsigned long long idx = i;
 				template_context.add_type(reinterpret_cast<Type*&>(idx), (*ta)[i].second);
@@ -1191,14 +1266,12 @@ parser::init_rules mparse_rules =
 					syntax_node[1]
 				)[0]
 			)[0].code_gen(&template_context).get_data<function_params>();
-			context->add_template_func(ta, params, *syntax_node[1].code_gen(nullptr).get_data<std::string>(), syntax_node[1]);
+			context->add_template_func(ta, params, static_cast<term_node&>(
+					static_cast<gen_node&>(syntax_node[1])[1]
+				).data.attr->value, syntax_node[1]);
 			delete ta;
 			delete params;
 			return AST_result();
-		},
-		{
-			{ 1, parser::enter_block },
-			{ 4, parser::leave_block }
 		}}
 	}},
 	{ "TemplateParams", {
@@ -1231,6 +1304,19 @@ parser::init_rules mparse_rules =
 					static_cast<term_node&>(syntax_node[1]).data.attr->value));
 		}},
 	}},
+	{ "TemplateFunctionCall", {					// TODO remove this
+		{ "IdTemplate ( exprpk )", [](gen_node& syntax_node, AST_context* context){
+			auto params = syntax_node[1].code_gen(context).get_data<std::vector<Value*>>();
+			auto fdata = syntax_node[0].code_gen(context).get_as<ltype::template_func>();
+			llvm::Function* function = reinterpret_cast<template_func_meta*>(fdata)->get_function(*params, context);
+			auto call_inst = function->getReturnType() != void_type ? lBuilder.CreateCall(function, *params, "Call")
+				: lBuilder.CreateCall(function, *params);
+			delete params;
+			if (function->getReturnType() != void_type) return AST_result(call_inst, false);
+				else return AST_result();
+		}}
+	}},
+
 	// Defination
 	{ "TypeDefine", {
 		{ "TypeDefine, Id = Type", [](gen_node& syntax_node, AST_context* context){
@@ -1361,9 +1447,9 @@ parser::init_rules mparse_rules =
 		{ "", parser::empty }
 	}},
 
-	// Struct
-	{ "StructDefine", {
-		{ "class Id StructBase { StructInterface }", [](gen_node& syntax_node, AST_context* context){
+	// Class
+	{ "Class", {
+		{ "class Id ClassBase { ClassInterface }", [](gen_node& syntax_node, AST_context* context){
 			auto& class_name =  static_cast<term_node&>(syntax_node[0]).data.attr->value;
 			Type* base = nullptr;
 			unsigned hwnd = is_public;
@@ -1394,7 +1480,7 @@ parser::init_rules mparse_rules =
 			{ 6, parser::leave_block }
 		}},
 	}},
-	{ "StructBase", {
+	{ "ClassBase", {
 		{ ": VisitAttr Id", [](gen_node& syntax_node, AST_context* context){
 			auto pir = new pair<Type*, unsigned>;
 			auto base = syntax_node[1].code_gen(context).get_type();
@@ -1405,11 +1491,11 @@ parser::init_rules mparse_rules =
 		}},
 		{ "", parser::empty }
 	}},
-	{ "StructInterface", {
-		{ "StructInterfaceItem StructInterface", parser::expand },
+	{ "ClassInterface", {
+		{ "ClassInterfaceItem ClassInterface", parser::expand },
 		{ "", parser::empty }
 	}},
-	{ "StructInterfaceItem", {
+	{ "ClassInterfaceItem", {
 		{ "VisitAttr Type Id ;", [](gen_node& syntax_node, AST_context* context){
 			auto struct_context = static_cast<AST_struct_context*>(context);
 			if (struct_context->chk_vptr && !struct_context->type)
