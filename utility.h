@@ -278,7 +278,8 @@ public:
 		template_func_params(*params),
 		syntax_node(sn)
 	{}
-	llvm::Function* get_function(const std::vector<llvm::Value*>& params, AST_context* context);
+	llvm::Function* get_function(const std::vector<llvm::Value*>& params,
+		AST_context* context, template_params* ta = nullptr);
 };
 
 class template_class_meta

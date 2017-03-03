@@ -90,7 +90,8 @@ public:
 	static const handler expand;
 
 	static const symbol_type is_type_symbol;
-	static const symbol_type is_template_symbol;
+	static const symbol_type is_template_func_symbol;
+	static const symbol_type is_template_class_symbol;
 
 	static void enter_block(parser* this_parser, AST& node)
 		{ this_parser->symbol_lookup.push(this_parser->symbol_lookup.top()); }
@@ -99,13 +100,21 @@ public:
 			if (this_parser->symbol_lookup.empty()) throw err("error when parsing enclosed scope"); }
 	static void register_type(parser* this_parser, AST& node)
 		{ this_parser->symbol_lookup.top()[static_cast<term_node&>(node).data.attr->value] = is_type_symbol; }
-	static void register_template(parser* this_parser, AST& node)
+	static void register_template_func(parser* this_parser, AST& node)
 		{
 			auto map = std::move(this_parser->symbol_lookup.top());
 			this_parser->symbol_lookup.pop();
-			this_parser->symbol_lookup.top()[static_cast<term_node&>(node).data.attr->value] = is_template_symbol;
+			this_parser->symbol_lookup.top()[static_cast<term_node&>(node).data.attr->value] = is_template_func_symbol;
 			this_parser->symbol_lookup.push(std::move(map));
-			this_parser->symbol_lookup.top()[static_cast<term_node&>(node).data.attr->value] = is_template_symbol;
+			this_parser->symbol_lookup.top()[static_cast<term_node&>(node).data.attr->value] = is_template_func_symbol;
+		}
+	static void register_template_class(parser* this_parser, AST& node)
+		{
+			auto map = std::move(this_parser->symbol_lookup.top());
+			this_parser->symbol_lookup.pop();
+			this_parser->symbol_lookup.top()[static_cast<term_node&>(node).data.attr->value] = is_template_class_symbol;
+			this_parser->symbol_lookup.push(std::move(map));
+			this_parser->symbol_lookup.top()[static_cast<term_node&>(node).data.attr->value] = is_template_class_symbol;
 		}
 		
 	template <unsigned attr>
@@ -147,7 +156,8 @@ const parser::handler parser::expand = [](gen_node& T, AST_context* context)->AS
 
 // parser callback
 const parser::symbol_type parser::is_type_symbol = 1;
-const parser::symbol_type parser::is_template_symbol = 2;
+const parser::symbol_type parser::is_template_func_symbol = 2;
+const parser::symbol_type parser::is_template_class_symbol = 3;
 	
 struct expr_gen_err: err
 {

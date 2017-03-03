@@ -49,7 +49,8 @@ lexer::init_rules mlex_rules =
 		// identifier
 		{ "Id", "[a-zA-Z_]\\w*", {word} },
 		{ "IdType", "", {word} },
-		{ "IdTemplate", "", {word} },
+		{ "IdTemplateFunc", "", {word} },
+		{ "IdTemplateClass", "", {word} },
 		// number literal
 		{ "Float", "\\d+\\.\\d+", {word} },
 		{ "Scientific", "\\d+e-?\\d+", {word, ignore_case} },
@@ -1098,7 +1099,7 @@ parser::init_rules mparse_rules =
 		{ "IdType", [](gen_node& syntax_node, AST_context* context){
 			return context->get_type(static_cast<term_node&>(syntax_node[0]).data.attr->value);
 		}},
-		{ "IdTemplate < TemplateArgumentPack >", [](gen_node& syntax_node, AST_context* context){
+		{ "IdTemplateClass < TemplateArgumentPack >", [](gen_node& syntax_node, AST_context* context){
 			auto vec = syntax_node[1].code_gen(context).get_data<template_params>();
 			auto ty = reinterpret_cast<template_class_meta*>(
 					syntax_node[0].code_gen(context).get_as<ltype::template_class>()
@@ -1192,7 +1193,7 @@ parser::init_rules mparse_rules =
 			return AST_result(reinterpret_cast<void*>(new_context.function));
 		},
 		{	//$ parser callback
-			{ 3, parser::register_template },
+			{ 3, parser::register_template_func },
 			{ 4, parser::enter_block },
 			{ 6, parser::leave_block }
 		}}
@@ -1224,7 +1225,7 @@ parser::init_rules mparse_rules =
 			return AST_result(reinterpret_cast<void*>(struct_context->type));
 		},
 		{	//$ parser callback
-			{ 2, parser::register_template },
+			{ 2, parser::register_template_class },
 			{ 4, parser::enter_block },
 			{ 6, parser::leave_block }
 		}},
@@ -1260,7 +1261,7 @@ parser::init_rules mparse_rules =
 				unsigned long long idx = i;
 				template_context.add_type(reinterpret_cast<Type*&>(idx), (*ta)[i].second);
 			}
-			else throw err("non-typename template argument not supported");
+			//else throw err("non-typename template argument not supported");
 			auto params = static_cast<gen_node&>(
 				static_cast<gen_node&>(
 					syntax_node[1]
@@ -1305,7 +1306,19 @@ parser::init_rules mparse_rules =
 		}},
 	}},
 	{ "TemplateFunctionCall", {					// TODO remove this
-		{ "IdTemplate ( exprpk )", [](gen_node& syntax_node, AST_context* context){
+		{ "IdTemplateFunc < TemplateArgumentPack > ( exprpk )", [](gen_node& syntax_node, AST_context* context){
+			auto vec = syntax_node[1].code_gen(context).get_data<template_params>();
+			auto params = syntax_node[2].code_gen(context).get_data<std::vector<Value*>>();
+			auto fdata = syntax_node[0].code_gen(context).get_as<ltype::template_func>();
+			llvm::Function* function = reinterpret_cast<template_func_meta*>(fdata)->get_function(*params, context, vec);
+			auto call_inst = function->getReturnType() != void_type ? lBuilder.CreateCall(function, *params, "Call")
+				: lBuilder.CreateCall(function, *params);
+			delete params;
+			delete vec;
+			if (function->getReturnType() != void_type) return AST_result(call_inst, false);
+				else return AST_result();
+		}},
+		{ "IdTemplateFunc ( exprpk )", [](gen_node& syntax_node, AST_context* context){
 			auto params = syntax_node[1].code_gen(context).get_data<std::vector<Value*>>();
 			auto fdata = syntax_node[0].code_gen(context).get_as<ltype::template_func>();
 			llvm::Function* function = reinterpret_cast<template_func_meta*>(fdata)->get_function(*params, context);
@@ -1617,7 +1630,8 @@ parser::reinterpret_list rep_list =
 {
 	{ "Id", {
 		{ parser::is_type_symbol, "IdType" },
-		{ parser::is_template_symbol, "IdTemplate" }
+		{ parser::is_template_func_symbol, "IdTemplateFunc" },
+		{ parser::is_template_class_symbol, "IdTemplateClass" }
 	}}
 };
 

@@ -362,27 +362,37 @@ AST_function_context::~AST_function_context()
 	#endif
 }
 
-llvm::Function* template_func_meta::get_function(const std::vector<llvm::Value*>& params, AST_context* context)
+llvm::Function* template_func_meta::get_function(const std::vector<llvm::Value*>& params, AST_context* context, template_params* ta)
 {
 	if (params.size() != template_func_params.size())
 		throw err("using template function with wrong argument number");
 	function_params deduct_type, real_type;
 	deduct_type.resize(template_args.size());
+	if (ta)
+	{
+		if (ta->size() > template_args.size())
+			throw err("too many template arguments");
+		for (unsigned idx = 0; idx != ta->size(); ++idx)
+		{
+			if (!template_args[idx].first)		// typename
+				deduct_type[idx] = (*ta)[idx].get_type();
+		}
+	}
 	for (unsigned i = 0; i != params.size(); ++i)
 	{
 		if (params[i]->getType() != template_func_params[i])
 		{
 			unsigned idx = reinterpret_cast<unsigned long long&>(template_func_params[i]);
-			if (idx < template_args.size())
+			if (idx < template_args.size())		// typename
 			{
 				if (!deduct_type[idx])
 				{
 					deduct_type[idx] = params[i]->getType();
 				}
 				else if (deduct_type[idx] != params[i]->getType())
-					throw err("deduction conflicted when refer to typename");
+					throw err("deduction conflicted at typename " + template_args[idx].second);
 			}
-			else throw err("invalid operand in calling template function");
+			else throw err("invalid operand when calling template function");
 		}
 		real_type.push_back(params[i]->getType());
 	}
@@ -390,7 +400,14 @@ llvm::Function* template_func_meta::get_function(const std::vector<llvm::Value*>
 	for (unsigned idx = 0; idx != deduct_type.size(); ++idx)
 	{
 		if (!deduct_type[idx])
-			throw err("cannot deduct template function param type with the given params");
+		{
+			if (!ta || ta->size() <= idx)
+				throw err("cannot deduct template argument " + template_args[idx].second + " with the given params");
+			if (template_args[idx].first)		// constant
+				template_context.add_constant(create_implicit_cast(
+					(*ta)[idx].get_constant(), template_args[idx].first
+				), template_args[idx].second);
+		}
 		template_context.add_type(deduct_type[idx], template_args[idx].second);
 	}
 	if (rlist[real_type]) return rlist[real_type];
@@ -405,7 +422,11 @@ llvm::StructType* template_class_meta::generate_class(const template_params& par
 	AST_template_context template_context(context);
 	for (unsigned i = 0; i != params.size(); ++i)
 	{
-		template_context.add_type(params[i].get_type(), template_args[i].second);
+		if (template_args[i].first == nullptr)
+			template_context.add_type(params[i].get_type(), template_args[i].second);
+		else template_context.add_constant(create_implicit_cast(
+				params[i].get_constant(), template_args[i].first
+			), template_args[i].second);
 	}
 	if (rlist[params]) return rlist[params];
 	return syntax_node.code_gen(&template_context).get_data<llvm::StructType>();
