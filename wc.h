@@ -1242,7 +1242,7 @@ parser::init_rules mparse_rules =
 		{ "FunctionTemplate", parser::forward }
 	}},
 	{ "ClassTemplate", {
-		{ "< TemplateParams > TemplateClass", [](gen_node& syntax_node, AST_context*context){
+		{ "< TemplateParams > TemplateClass ;", [](gen_node& syntax_node, AST_context*context){
 			auto ta = syntax_node[0].code_gen(context).get_data<template_args_type>();
 			context->add_template_class(ta, static_cast<term_node&>(
 					static_cast<gen_node&>(syntax_node[1])[0]
