@@ -675,6 +675,7 @@ class AST_context: public AST_namespace
 protected:
 	AST_context* parent;
 public:
+	llvm::Type* cur_type = nullptr;
 	bool collect_param_name = false;
 	std::vector<std::string> function_param_name;
 public:

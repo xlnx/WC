@@ -14,6 +14,7 @@ lexer::init_rules mlex_rules =
 		{ "float", "float", {word} },
 		{ "char", "char", {word} },
 		{ "bool", "bool", {word} },
+		{ "void", "void", {word} },
 		// key words
 		{ "while", "while", {word, no_attr} },
 		{ "if", "if", {word, no_attr} },
@@ -21,14 +22,11 @@ lexer::init_rules mlex_rules =
 		{ "finally", "finally", {word, no_attr} },
 		{ "for", "for", {word, no_attr} },
 		{ "do", "do", {word, no_attr} },
-		{ "ptr", "ptr", {word, no_attr} },
 		{ "ref", "ref", {word, no_attr} },
-		{ "pointer", "pointer", {word, no_attr} },
-		{ "own", "own", {word, no_attr} },
-		{ "inh", "inh", {word, no_attr} },
-		{ "pub", "pub", {word, no_attr} },
+		{ "private", "private", {word, no_attr} },
+		{ "protected", "protected", {word, no_attr} },
+		{ "public", "public", {word, no_attr} },
 		{ "fn", "fn", {word, no_attr} },
-		{ "arr", "arr", {word, no_attr} },
 		{ "let", "let", {word, no_attr} },
 		{ "as", "as", {word, no_attr} },
 		{ "lambda", "lambda", {word, no_attr} },
@@ -131,6 +129,7 @@ lexer::init_rules mlex_rules =
 		{ "float", [](term_node&, AST_context*){ return AST_result(float_type); } },
 		{ "char", [](term_node&, AST_context*){ return AST_result(char_type); } },
 		{ "bool", [](term_node&, AST_context*){ return AST_result(bool_type); } },
+		{ "void", [](term_node&, AST_context*){ return AST_result(void_type); } },
 		{ "true", [](term_node&, AST_context*){ return AST_result(ConstantInt::get(bool_type, 1), false); } },
 		{ "false", [](term_node&, AST_context*){ return AST_result(ConstantInt::get(bool_type, 0), false); } }
 	}
@@ -966,10 +965,10 @@ parser::init_rules mparse_rules =
 
 	// Expressions
 	{ "Expr", {
-		/*{ "Expr, expr", [](gen_node& syntax_node, AST_context* context){
+		{ "Expr, expr", [](gen_node& syntax_node, AST_context* context){
 			syntax_node[0].code_gen(context);
 			return syntax_node[1].code_gen(context);
-		}},*/
+		}},
 		{ "expr", [](gen_node& syntax_node, AST_context* context){
 			auto data = syntax_node[0].code_gen(context);
 			if (auto ptr = reinterpret_cast<overload_map_type*>(data.get<ltype::overload>()))
@@ -984,60 +983,134 @@ parser::init_rules mparse_rules =
 		}}
 	}},
 	{ "ConstExpr", {
-		/*{ "ConstExpr, constexpr", [](gen_node& syntax_node, AST_context* context){
+		{ "ConstExpr, constexpr", [](gen_node& syntax_node, AST_context* context){
 			syntax_node[0].code_gen(context);
 			return syntax_node[1].code_gen(context);
-		}},*/
+		}},
 		{ "constexpr", parser::forward }
 	}},
 	{ "Type", {
-		{ "pointer", [](gen_node& syntax_node, AST_context* context){
-			return AST_result(void_ptr_type);
-		}},
-		{ "ptr Type", [](gen_node& syntax_node, AST_context* context){
-			auto base_type = syntax_node[0].code_gen(context).get_type();
-			auto ret = PointerType::getUnqual(base_type);
-			type_names[ret] = type_names[base_type] + " ptr";
+		{ "TypeElem TypeExpr", [](gen_node& syntax_node, AST_context* context){
+			auto type = context->cur_type;
+			context->cur_type = syntax_node[0].code_gen(context).get_type();
+			syntax_node[1].code_gen(context);
+			auto ret = context->cur_type;
+			if (ret == void_type) throw err("cannot declare variable of void type");
+			context->cur_type = type;
 			return AST_result(ret);
+		}}
+	}},
+	{ "TypeExpr_m", {
+		{ "* TypeExpr", [](gen_node& syntax_node, AST_context* context){
+			auto base_type = context->cur_type;
+			context->cur_type = base_type == void_type ? 
+				void_ptr_type : 
+				PointerType::getUnqual(base_type);
+			type_names[context->cur_type] = "ptr " + type_names[base_type];
+			return syntax_node[0].code_gen(context);
 		}},
-		{ "fn ( FunctionParams ) FunctionRetType", [](gen_node& syntax_node, AST_context* context){
-			auto base_type = syntax_node[1].code_gen(context).get_type();
+		{ "TypeExpr1", parser::forward }
+	}},
+	{ "TypeExpr", {
+		{ "* TypeExpr", [](gen_node& syntax_node, AST_context* context){
+			auto base_type = context->cur_type;
+			context->cur_type = base_type == void_type ? 
+				void_ptr_type : 
+				PointerType::getUnqual(base_type);
+			type_names[context->cur_type] = "ptr " + type_names[base_type];
+			return syntax_node[0].code_gen(context);
+		}},
+		{ "TypeExpr1", parser::forward },
+		{ "", parser::forward }
+	}},
+	{ "TypeExpr1", {
+		{ "TypeExpr1 ( FunctionParams )", [](gen_node& syntax_node, AST_context* context){
+			auto base_type = context->cur_type;			//syntax_node[0].code_gen(context).get_type();
 			if (base_type->isArrayTy())
 				throw err("function cannot return an array");
 			if (base_type->isFunctionTy())
 				throw err("function cannot return a function");
-
-			auto params = syntax_node[0].code_gen(context).get_data<function_params>();
-			auto ret = FunctionType::get(base_type, *params, false);	// cannot return an array
-			type_names[ret] = type_names[base_type] + "(";
+			
+			auto params = syntax_node[1].code_gen(context).get_data<function_params>();
+			context->cur_type = FunctionType::get(base_type, *params, false);	// cannot return an array
+			type_names[context->cur_type] = type_names[base_type] + "(";
 			if (params->size())
 			{
-				type_names[ret] += type_names[(*params)[0]];
+				type_names[context->cur_type] += type_names[(*params)[0]];
 				for (auto itr = params->begin() + 1; itr != params->end(); ++itr)
-					type_names[ret] += ", " + type_names[*itr];
+					type_names[context->cur_type] += ", " + type_names[*itr];
 			}
-			type_names[ret] += ")";
+			type_names[context->cur_type] += ")";
 			delete params;
-			return AST_result(ret);
+			return syntax_node[0].code_gen(context);
 		}},
-		{ "arr ConstExpr Type", [](gen_node& syntax_node, AST_context* context){
-			auto base_type = syntax_node[1].code_gen(context).get_type();
+		{ "TypeExpr1 [ ConstExpr ]", [](gen_node& syntax_node, AST_context* context){
+			auto base_type = context->cur_type;
 			if (base_type->isFunctionTy())
 				throw err("cannot create array of function");
+			if (base_type->isVoidTy())
+				throw err("cannot create array of void type");
+
+			auto size = static_cast<ConstantInt*>(create_implicit_cast(
+				syntax_node[1].code_gen(context).get_as<ltype::rvalue>(), int_type));
+			if (size->isNegative()) throw err("negative array size");
+			//auto elem_type = context->current_type;
+			context->cur_type = ArrayType::get(base_type, size->getZExtValue());
+			// record typename
+			type_names[context->cur_type] = type_names[base_type] + "[" + [](int x)->string
+			{
+				char s[20];	sprintf(s, "%d", x); return s;
+			}(size->getZExtValue()) + "]";
+			return syntax_node[0].code_gen(context);
+		}},
+		{ "TypeExpr2", parser::forward }
+	}},
+	{ "TypeExpr2", {
+		{ "( TypeExpr_m )", parser::forward },
+		{ "( FunctionParams )", [](gen_node& syntax_node, AST_context* context){
+			auto base_type = context->cur_type;			//syntax_node[0].code_gen(context).get_type();
+			if (base_type->isArrayTy())
+				throw err("function cannot return an array");
+			if (base_type->isFunctionTy())
+				throw err("function cannot return a function");
+			
+			auto params = syntax_node[0].code_gen(context).get_data<function_params>();
+			context->cur_type = FunctionType::get(base_type, *params, false);	// cannot return an array
+			type_names[context->cur_type] = type_names[base_type] + "(";
+			if (params->size())
+			{
+				type_names[context->cur_type] += type_names[(*params)[0]];
+				for (auto itr = params->begin() + 1; itr != params->end(); ++itr)
+					type_names[context->cur_type] += ", " + type_names[*itr];
+			}
+			type_names[context->cur_type] += ")";
+			delete params;
+			return AST_result();
+		}},
+		{ "[ ConstExpr ]", [](gen_node& syntax_node, AST_context* context){
+			auto base_type = context->cur_type;
+			if (base_type->isFunctionTy())
+				throw err("cannot create array of function");
+			if (base_type->isVoidTy())
+				throw err("cannot create array of void type");
 
 			auto size = static_cast<ConstantInt*>(create_implicit_cast(
 				syntax_node[0].code_gen(context).get_as<ltype::rvalue>(), int_type));
 			if (size->isNegative()) throw err("negative array size");
 			//auto elem_type = context->current_type;
-			auto ret = ArrayType::get(base_type, size->getZExtValue());
+			context->cur_type = ArrayType::get(base_type, size->getZExtValue());
 			// record typename
-			type_names[ret] = type_names[base_type] + "[" + [](int x)->string
+			type_names[context->cur_type] = type_names[base_type] + "[" + [](int x)->string
 			{
 				char s[20];	sprintf(s, "%d", x); return s;
 			}(size->getZExtValue()) + "]";
-			return AST_result(ret);
+			return AST_result();
 		}},
-		{ "TypeElem", parser::forward }		// dummy
+		//{ "", parser::empty }
+	}},
+	{ "FunctionRetType", {
+		{ "-> Type", parser::forward },
+		{ "", [](gen_node&, AST_context*){ return AST_result(void_type); } }
 	}},
 	{ "LambdaType", {
 		{ "( FunctionParams ) FunctionRetType", [](gen_node& syntax_node, AST_context* context){
@@ -1060,10 +1133,6 @@ parser::init_rules mparse_rules =
 			delete params;
 			return AST_result(ret);
 		}},
-	}},
-	{ "FunctionRetType", {
-		{ "-> Type", parser::forward },
-		{ "", [](gen_node&, AST_context*){ return AST_result(void_type); } }
 	}},
 	{ "TemplateArgumentPack", {
 		{ "TemplateArgumentPack , TemplateArgument", [](gen_node& syntax_node, AST_context* context){
@@ -1096,9 +1165,30 @@ parser::init_rules mparse_rules =
 		{ "float", parser::forward },
 		{ "char", parser::forward },
 		{ "bool", parser::forward },
+		{ "void", parser::forward },
 		{ "IdType", [](gen_node& syntax_node, AST_context* context){
 			return context->get_type(static_cast<term_node&>(syntax_node[0]).data.attr->value);
 		}},
+		/*{ "fn ( FunctionParams ) FunctionRetType", [](gen_node& syntax_node, AST_context* context){
+			auto base_type = syntax_node[1].code_gen(context).get_type();
+			if (base_type->isArrayTy())
+				throw err("function cannot return an array");
+			if (base_type->isFunctionTy())
+				throw err("function cannot return a function");
+
+			auto params = syntax_node[0].code_gen(context).get_data<function_params>();
+			auto ret = FunctionType::get(base_type, *params, false);	// cannot return an array
+			type_names[ret] = type_names[base_type] + "(";
+			if (params->size())
+			{
+				type_names[ret] += type_names[(*params)[0]];
+				for (auto itr = params->begin() + 1; itr != params->end(); ++itr)
+					type_names[ret] += ", " + type_names[*itr];
+			}
+			type_names[ret] += ")";
+			delete params;
+			return AST_result(ret);
+		}},*/
 		{ "IdTemplateClass < TemplateArgumentPack >", [](gen_node& syntax_node, AST_context* context){
 			auto vec = syntax_node[1].code_gen(context).get_data<template_params>();
 			auto ty = reinterpret_cast<template_class_meta*>(
@@ -1159,16 +1249,32 @@ parser::init_rules mparse_rules =
 		}}
 	}},
 	{ "Function", {
-		{ "Type Id { Block }", [](gen_node& syntax_node, AST_context* context){
+		{ "Type Id ( FunctionParams ) { Block }", [](gen_node& syntax_node, AST_context* context){
 			context->collect_param_name = true;
 			context->function_param_name.resize(0);
-			auto type = syntax_node[0].code_gen(context).get_type();
 			auto name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
-			if (!type->isFunctionTy()) throw err("target is not function type");
-			Function* F = Function::Create(static_cast<FunctionType*>(type), Function::ExternalLinkage, name, lModule);
+			auto base_type = syntax_node[0].code_gen(context).get_type();			//syntax_node[0].code_gen(context).get_type();
+			if (base_type->isArrayTy())
+				throw err("function cannot return an array");
+			if (base_type->isFunctionTy())
+				throw err("function cannot return a function");
+			
+			auto params = syntax_node[2].code_gen(context).get_data<function_params>();
+			auto type = FunctionType::get(base_type, *params, false);	// cannot return an array
+			type_names[type] = type_names[base_type] + "(";
+			if (params->size())
+			{
+				type_names[type] += type_names[(*params)[0]];
+				for (auto itr = params->begin() + 1; itr != params->end(); ++itr)
+					type_names[type] += ", " + type_names[*itr];
+			}
+			type_names[type] += ")";
+			delete params;
+
+			Function* F = Function::Create(type, Function::ExternalLinkage, name, lModule);
 			AST_function_context new_context(context, F, name);
 			new_context.register_args();
-			syntax_node[2].code_gen(&new_context);
+			syntax_node[3].code_gen(&new_context);
 			return AST_result();
 		},
 		{	//$ parser callback
@@ -1179,17 +1285,33 @@ parser::init_rules mparse_rules =
 
 	// Template
 	{ "TemplateFunction", {
-		{ "fn LambdaType Id { Block }", [](gen_node& syntax_node, AST_context* context){
+		{ "Type Id ( FunctionParams ) { Block }", [](gen_node& syntax_node, AST_context* context){
 			context->collect_param_name = true;
 			context->function_param_name.resize(0);
-			auto type = syntax_node[0].code_gen(context).get_type();
 			auto name = static_cast<term_node&>(syntax_node[1]).data.attr->value;
-			if (!type->isFunctionTy()) throw err("target is not function type");
-			Function* F = Function::Create(static_cast<FunctionType*>(type), Function::ExternalLinkage, name, lModule);
+			auto base_type = syntax_node[0].code_gen(context).get_type();
+			if (base_type->isArrayTy())
+				throw err("function cannot return an array");
+			if (base_type->isFunctionTy())
+				throw err("function cannot return a function");
+
+			auto params = syntax_node[2].code_gen(context).get_data<function_params>();
+			auto type = FunctionType::get(base_type, *params, false);	// cannot return an array
+			type_names[type] = type_names[base_type] + "(";
+			if (params->size())
+			{
+				type_names[type] += type_names[(*params)[0]];
+				for (auto itr = params->begin() + 1; itr != params->end(); ++itr)
+					type_names[type] += ", " + type_names[*itr];
+			}
+			type_names[type] += ")";
+			delete params;
+
+			Function* F = Function::Create(type, Function::ExternalLinkage, name, lModule);
 			AST_function_context new_context(context, F);
 			*static_cast<AST_template_context*>(context)->func_ptr = new_context.function;
 			new_context.register_args();
-			syntax_node[2].code_gen(&new_context);
+			syntax_node[3].code_gen(&new_context);
 			return AST_result(reinterpret_cast<void*>(new_context.function));
 		},
 		{	//$ parser callback
@@ -1523,7 +1645,7 @@ parser::init_rules mparse_rules =
 		{ "Method", parser::forward }
 	}},
 	{ "Method", {
-		{ "VisitAttr Type Id MethodAttr { Block }", [](gen_node& syntax_node, AST_context* context){
+		{ "VisitAttr Type Id ( FunctionParams ) MethodAttr { Block }", [](gen_node& syntax_node, AST_context* context){
 			auto struct_context = static_cast<AST_struct_context*>(context);
 			if (!struct_context->chk_vptr)
 			{
@@ -1533,13 +1655,29 @@ parser::init_rules mparse_rules =
 			}
 			else if (struct_context->type)
 			{
-				auto fnattr = syntax_node[3].code_gen(context).get_data<function_attr>();
+				auto fnattr = syntax_node[4].code_gen(context).get_data<function_attr>();
 				context->collect_param_name = true;
 				context->function_param_name.resize(0);
-				auto type = syntax_node[1].code_gen(context).get_type();
 				auto name = static_cast<term_node&>(syntax_node[2]).data.attr->value;
-				if (!type->isFunctionTy()) throw err("target is not function type");
-				AST_method_context new_context(struct_context, static_cast<FunctionType*>(type), name, fnattr);
+				auto base_type = syntax_node[1].code_gen(context).get_type();
+				if (base_type->isArrayTy())
+					throw err("function cannot return an array");
+				if (base_type->isFunctionTy())
+					throw err("function cannot return a function");
+				
+				auto params = syntax_node[2].code_gen(context).get_data<function_params>();
+				auto type = FunctionType::get(base_type, *params, false);	// cannot return an array
+				type_names[type] = type_names[base_type] + "(";
+				if (params->size())
+				{
+					type_names[type] += type_names[(*params)[0]];
+					for (auto itr = params->begin() + 1; itr != params->end(); ++itr)
+						type_names[type] += ", " + type_names[*itr];
+				}
+				type_names[type] += ")";
+				delete params;
+
+				AST_method_context new_context(struct_context, type, name, fnattr);
 				struct_context->set_name_visibility(name, syntax_node[0].code_gen(context).get_attr());
 				new_context.register_args();
 				syntax_node[4].code_gen(&new_context);
@@ -1572,9 +1710,9 @@ parser::init_rules mparse_rules =
 		{ "override", parser::attribute<is_override> },
 	}},
 	{ "VisitAttr", {
-		{ "own", parser::attribute<is_private> },
-		{ "inh", parser::attribute<is_protected> },
-		{ "pub", parser::attribute<is_public> },
+		{ "private", parser::attribute<is_private> },
+		{ "protected", parser::attribute<is_protected> },
+		{ "public", parser::attribute<is_public> },
 	}},
 
 
