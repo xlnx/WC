@@ -1111,6 +1111,10 @@ public:
 		default_block(switch_end)
 	{}
 public:
+	void alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init) override
+		{ throw err("unable to allocate variable within switch context"); }
+	void add_ref(llvm::Value* alloc_ptr, const std::string& name) override
+		{ throw err("unable to add reference within switch context"); }
 	void make_break() override
 		{ make_br(switch_end); }
 };

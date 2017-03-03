@@ -29,7 +29,6 @@ lexer::init_rules mlex_rules =
 		{ "fn", "fn", {word, no_attr} },
 		{ "let", "let", {word, no_attr} },
 		{ "as", "as", {word, no_attr} },
-		{ "lambda", "lambda", {word, no_attr} },
 		{ "virtual", "virtual", {word, no_attr} },
 		{ "override", "override", {word, no_attr} },
 		{ "switch", "switch", {word, no_attr} },
@@ -764,31 +763,42 @@ parser::init_rules mparse_rules =
 		}},
 	}},
 	{ "CasesWithoutDefault", {
-		{ "case ConstExpr : StmtEmptyBlock CasesWithoutDefault", [](gen_node& syntax_node, AST_context* context){
+		{ "case ConstExpr : Stmts CasesWithoutDefault", [](gen_node& syntax_node, AST_context* context){
 			auto label = static_cast<ConstantInt*>(syntax_node[0].code_gen(context).get_as<ltype::integer>());
-			auto block_val = syntax_node[1].code_gen(context);
-			auto block = block_val.flag ? block_val.get_data<llvm::BasicBlock>() : nullptr;
 			auto switch_context = static_cast<AST_switch_context*>(context);
-			if (!switch_context->default_block && block) switch_context->default_block = block;
-			switch_context->cases.push_back(make_pair(label, block));
+			auto case_block = AST_context::new_block("CaseBlock");
+			if (!switch_context->cases.empty())
+				switch_context->make_br(case_block);
+			static_cast<AST_local_context*>(context)->set_block(case_block);
+			syntax_node[1].code_gen(context);
+			//if (!switch_context->default_block) switch_context->default_block = case_block;
+			switch_context->cases.push_back(make_pair(label, case_block));
 			syntax_node[2].code_gen(context);
 			return AST_result();
 		}},
 		{ "", parser::empty }
 	}},
 	{ "Cases", {
-		{ "case ConstExpr : StmtEmptyBlock Cases", [](gen_node& syntax_node, AST_context* context){
+		{ "case ConstExpr : Stmts Cases", [](gen_node& syntax_node, AST_context* context){
 			auto label = static_cast<ConstantInt*>(syntax_node[0].code_gen(context).get_as<ltype::integer>());
-			auto block_val = syntax_node[1].code_gen(context);
-			auto block = block_val.flag ? block_val.get_data<llvm::BasicBlock>() : nullptr;
-			static_cast<AST_switch_context*>(context)->cases.push_back(make_pair(label, block));
+			auto switch_context = static_cast<AST_switch_context*>(context);
+			auto case_block = AST_context::new_block("CaseBlock");
+			if (!switch_context->cases.empty())
+				switch_context->make_br(case_block);
+			static_cast<AST_local_context*>(context)->set_block(case_block);
+			syntax_node[1].code_gen(context);
+			switch_context->cases.push_back(make_pair(label, case_block));
 			syntax_node[2].code_gen(context);
 			return AST_result();
 		}},
-		{ "default : StmtEmptyBlock CasesWithoutDefault", [](gen_node& syntax_node, AST_context* context){
-			auto block_val = syntax_node[0].code_gen(context);
-			static_cast<AST_switch_context*>(context)->default_block = block_val.flag ?
-				block_val.get_data<llvm::BasicBlock>() : nullptr;
+		{ "default : Stmts CasesWithoutDefault", [](gen_node& syntax_node, AST_context* context){
+			auto switch_context = static_cast<AST_switch_context*>(context);
+			auto case_block = AST_context::new_block("CaseBlock");
+			if (!switch_context->cases.empty())
+				switch_context->make_br(case_block);
+			static_cast<AST_local_context*>(context)->set_block(case_block);
+			syntax_node[0].code_gen(context);
+			static_cast<AST_switch_context*>(context)->default_block = case_block;
 			syntax_node[1].code_gen(context);
 			return AST_result();
 		}},
@@ -800,6 +810,8 @@ parser::init_rules mparse_rules =
 			auto value = syntax_node[0].code_gen(context).get_as<ltype::integer>();
 			switch_context.make_br(switch_context.switch_block);
 			syntax_node[1].code_gen(&switch_context);
+			if (!switch_context.cases.empty())
+				switch_context.make_br(switch_context.switch_end);
 
 			switch_context.set_block(switch_context.switch_block);
 			if (!switch_context.default_block) switch_context.default_block = switch_context.switch_end;
@@ -942,8 +954,8 @@ parser::init_rules mparse_rules =
 		{ "continue ;", parser::forward },
 		{ ";", parser::empty }
 	}},
-	{ "StmtEmptyBlock", {
-		{ "StmtBlock", parser::forward },
+	{ "Stmts", {
+		{ "Stmts Stmt", parser::expand },
 		{ "", parser::empty }
 	}},
 	{ "StmtBlock", {
@@ -1717,7 +1729,7 @@ parser::init_rules mparse_rules =
 
 
 	{ "Lambda", {
-		{ "lambda LambdaType { Block }", [](gen_node& syntax_node, AST_context* T){
+		{ "LambdaType { Block }", [](gen_node& syntax_node, AST_context* T){
 			auto context = T->get_global_context();
 			context->collect_param_name = true;
 			context->function_param_name.resize(0);
