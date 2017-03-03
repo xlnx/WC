@@ -1007,7 +1007,6 @@ parser::init_rules mparse_rules =
 			context->cur_type = syntax_node[0].code_gen(context).get_type();
 			syntax_node[1].code_gen(context);
 			auto ret = context->cur_type;
-			if (ret == void_type) throw err("cannot declare variable of void type");
 			context->cur_type = type;
 			return AST_result(ret);
 		}}
@@ -1290,8 +1289,8 @@ parser::init_rules mparse_rules =
 			return AST_result();
 		},
 		{	//$ parser callback
-			{ 3, parser::enter_block },
-			{ 5, parser::leave_block }
+			{ 6, parser::enter_block },
+			{ 8, parser::leave_block }
 		}}
 	}},
 
@@ -1327,9 +1326,9 @@ parser::init_rules mparse_rules =
 			return AST_result(reinterpret_cast<void*>(new_context.function));
 		},
 		{	//$ parser callback
-			{ 3, parser::register_template_func },
-			{ 4, parser::enter_block },
-			{ 6, parser::leave_block }
+			{ 2, parser::register_template_func },
+			{ 6, parser::enter_block },
+			{ 8, parser::leave_block }
 		}}
 	}},
 	{ "TemplateClass", {
@@ -1657,27 +1656,27 @@ parser::init_rules mparse_rules =
 		{ "Method", parser::forward }
 	}},
 	{ "Method", {
-		{ "VisitAttr Type Id ( FunctionParams ) MethodAttr { Block }", [](gen_node& syntax_node, AST_context* context){
+		{ "VisitAttr MethodAttr Type Id ( FunctionParams ) { Block }", [](gen_node& syntax_node, AST_context* context){
 			auto struct_context = static_cast<AST_struct_context*>(context);
 			if (!struct_context->chk_vptr)
 			{
-				auto fnattr = syntax_node[3].code_gen(context).get_data<function_attr>();
+				auto fnattr = syntax_node[1].code_gen(context).get_data<function_attr>();
 				if (fnattr->count(is_virtual)) struct_context->is_vclass = true;
 				delete fnattr;
 			}
 			else if (struct_context->type)
 			{
-				auto fnattr = syntax_node[4].code_gen(context).get_data<function_attr>();
+				auto fnattr = syntax_node[1].code_gen(context).get_data<function_attr>();
 				context->collect_param_name = true;
 				context->function_param_name.resize(0);
-				auto name = static_cast<term_node&>(syntax_node[2]).data.attr->value;
-				auto base_type = syntax_node[1].code_gen(context).get_type();
+				auto name = static_cast<term_node&>(syntax_node[3]).data.attr->value;
+				auto base_type = syntax_node[2].code_gen(context).get_type();
 				if (base_type->isArrayTy())
 					throw err("function cannot return an array");
 				if (base_type->isFunctionTy())
 					throw err("function cannot return a function");
 				
-				auto params = syntax_node[2].code_gen(context).get_data<function_params>();
+				auto params = syntax_node[4].code_gen(context).get_data<function_params>();
 				auto type = FunctionType::get(base_type, *params, false);	// cannot return an array
 				type_names[type] = type_names[base_type] + "(";
 				if (params->size())
@@ -1692,14 +1691,52 @@ parser::init_rules mparse_rules =
 				AST_method_context new_context(struct_context, type, name, fnattr);
 				struct_context->set_name_visibility(name, syntax_node[0].code_gen(context).get_attr());
 				new_context.register_args();
-				syntax_node[4].code_gen(&new_context);
+				syntax_node[5].code_gen(&new_context);
 				delete fnattr;
 			}
 			return AST_result();
 		},
 		{	//$ parser callback
-			{ 5, parser::enter_block },
-			{ 7, parser::leave_block }
+			{ 8, parser::enter_block },
+			{ 10, parser::leave_block }
+		}},
+		{ "VisitAttr Type Id ( FunctionParams ) { Block }", [](gen_node& syntax_node, AST_context* context){
+			auto struct_context = static_cast<AST_struct_context*>(context);
+			if (struct_context->chk_vptr)
+				if (struct_context->type)
+			{
+				function_attr fnattr = {is_method};
+				context->collect_param_name = true;
+				context->function_param_name.resize(0);
+				auto name = static_cast<term_node&>(syntax_node[2]).data.attr->value;
+				auto base_type = syntax_node[1].code_gen(context).get_type();
+				if (base_type->isArrayTy())
+					throw err("function cannot return an array");
+				if (base_type->isFunctionTy())
+					throw err("function cannot return a function");
+				
+				auto params = syntax_node[3].code_gen(context).get_data<function_params>();
+				auto type = FunctionType::get(base_type, *params, false);	// cannot return an array
+				type_names[type] = type_names[base_type] + "(";
+				if (params->size())
+				{
+					type_names[type] += type_names[(*params)[0]];
+					for (auto itr = params->begin() + 1; itr != params->end(); ++itr)
+						type_names[type] += ", " + type_names[*itr];
+				}
+				type_names[type] += ")";
+				delete params;
+
+				AST_method_context new_context(struct_context, type, name, &fnattr);
+				struct_context->set_name_visibility(name, syntax_node[0].code_gen(context).get_attr());
+				new_context.register_args();
+				syntax_node[4].code_gen(&new_context);
+			}
+			return AST_result();
+		},
+		{	//$ parser callback
+			{ 7, parser::enter_block },
+			{ 9, parser::leave_block }
 		}}
 	}},
 	{ "MethodAttr", {
@@ -1711,8 +1748,9 @@ parser::init_rules mparse_rules =
 			if (attr == is_override) fnattr->insert(is_virtual);
 			return AST_result(fnattr);
 		}},
-		{ "", [](gen_node& syntax_node, AST_context* context){
+		{ "MethodAttrElem", [](gen_node& syntax_node, AST_context* context){
 			auto fnattr = new function_attr;
+			fnattr->insert(syntax_node[0].code_gen(context).get_attr());
 			fnattr->insert(is_method);
 			return AST_result(fnattr);
 		}}
@@ -1741,8 +1779,8 @@ parser::init_rules mparse_rules =
 			return AST_result(F, false);
 		},
 		{	//$ parser callback
-			{ 3, parser::enter_block },
-			{ 5, parser::leave_block }
+			{ 2, parser::enter_block },
+			{ 4, parser::leave_block }
 		}},
 	}},
 	// utils

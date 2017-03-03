@@ -684,7 +684,7 @@ public:
 		parent(p)
 	{}
 public:
-	virtual void alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init) = 0;
+	virtual void alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init = nullptr) = 0;
 	virtual void add_ref(llvm::Value* alloc_ptr, const std::string& name) = 0;
 	AST_context* get_global_context()
 		{ return parent ? parent->get_global_context() : this; }
@@ -822,8 +822,9 @@ public:
 				llvm::GlobalValue::ExternalLinkage, cvtable, "vtable");
 		}
 	}
-	void alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init) override
+	void alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init = nullptr) override
 	{
+		if (type->isVoidTy()) throw err("cannot declare variable of void type");
 		if (type->isFunctionTy()) throw err("cannot create unimplemented function in class context");
 		elems.push_back(type);
 		if (idx_lookup[name]) throw err("redeclared identifier " + name);
@@ -970,6 +971,7 @@ public:
 			throw err("cannot alloc a dummy variable");
 		if (init)
 			init = create_implicit_cast(init, type);
+		if (type->isVoidTy()) throw err("cannot declare variable of void type");
 		if (type->isFunctionTy()) throw err("cannot create unimplemented function in local context");
 		if (type->isStructTy())
 			throw err("cannot define a global object, ctor required");
@@ -1024,9 +1026,10 @@ public:
 		{ static_cast<AST_basic_local_context*>(parent)->make_continue(); }
 	virtual void make_return(llvm::Value* ret = nullptr)
 		{ static_cast<AST_basic_local_context*>(parent)->make_return(ret); }
-	void alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init) override
+	void alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init = nullptr) override
 	{
 		if (name == "") throw err("cannot alloc a dummy variable");
+		if (type->isVoidTy()) throw err("cannot declare variable of void type");
 		if (type->isFunctionTy()) throw err("cannot create unimplemented function in local context");
 		if (init) init = create_implicit_cast(init, type);
 		lBuilder.SetInsertPoint(get_alloc_block());
@@ -1111,7 +1114,7 @@ public:
 		default_block(switch_end)
 	{}
 public:
-	void alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init) override
+	void alloc_var(llvm::Type* type, const std::string& name, llvm::Value* init = nullptr) override
 		{ throw err("unable to allocate variable within switch context"); }
 	void add_ref(llvm::Value* alloc_ptr, const std::string& name) override
 		{ throw err("unable to add reference within switch context"); }
